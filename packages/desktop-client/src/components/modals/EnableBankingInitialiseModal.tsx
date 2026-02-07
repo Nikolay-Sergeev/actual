@@ -1,10 +1,11 @@
 // @ts-strict-ignore
 import React, { useState } from 'react';
+import { TextArea } from 'react-aria-components';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { ButtonWithLoading } from '@actual-app/components/button';
 import { InitialFocus } from '@actual-app/components/initial-focus';
-import { Input } from '@actual-app/components/input';
+import { baseInputStyle, Input } from '@actual-app/components/input';
 import { Text } from '@actual-app/components/text';
 import { View } from '@actual-app/components/view';
 
@@ -160,13 +161,20 @@ export function EnableBankingInitialiseModal({
                 title={t('Private Key (PEM):')}
                 htmlFor="enablebanking-private-key-field"
               />
-              <Input
+              <TextArea
                 id="enablebanking-private-key-field"
-                type="password"
                 value={privateKey}
-                onChangeValue={value => {
-                  setPrivateKey(value);
+                aria-label={t('Private Key (PEM)')}
+                onChange={event => {
+                  setPrivateKey(event.currentTarget.value);
                   setIsValid(true);
+                }}
+                style={{
+                  ...baseInputStyle,
+                  minHeight: 120,
+                  resize: 'vertical',
+                  fontFamily: 'monospace',
+                  whiteSpace: 'pre',
                 }}
               />
             </FormField>

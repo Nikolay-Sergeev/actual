@@ -64,9 +64,32 @@ function isEnableBankingConfigured() {
 }
 
 function normalizePrivateKey(privateKey) {
-  return privateKey?.includes('\\n')
-    ? privateKey.replaceAll('\\n', '\n')
-    : privateKey;
+  if (!privateKey) {
+    return privateKey;
+  }
+
+  let normalized = privateKey.trim();
+  if (normalized.includes('\\n')) {
+    normalized = normalized.replaceAll('\\n', '\n');
+  }
+  normalized = normalized.replace(/\r\n?/g, '\n');
+
+  // Support keys pasted into single-line inputs where line breaks are lost.
+  if (!normalized.includes('\n')) {
+    const pemMatch = normalized.match(
+      /^-----BEGIN ([A-Z ]+)-----([A-Za-z0-9+/=\s]+)-----END \1-----$/,
+    );
+    if (pemMatch) {
+      const [, label, body] = pemMatch;
+      const compactBody = body.replace(/\s+/g, '');
+      const wrappedBody =
+        compactBody.match(/.{1,64}/g)?.join('\n') ?? compactBody;
+
+      normalized = `-----BEGIN ${label}-----\n${wrappedBody}\n-----END ${label}-----`;
+    }
+  }
+
+  return normalized;
 }
 
 function createEnableBankingJwt() {

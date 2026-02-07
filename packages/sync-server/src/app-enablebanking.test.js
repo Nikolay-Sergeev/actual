@@ -70,6 +70,33 @@ describe('app-enablebanking', () => {
     );
   });
 
+  it('normalizes one-line PEM private key before JWT signing', async () => {
+    const jws = await import('jws');
+    secretsService.set(
+      SecretName.enablebanking_privateKey,
+      '-----BEGIN PRIVATE KEY----- abc def -----END PRIVATE KEY-----',
+    );
+
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ aspsps: [] }),
+    });
+
+    const res = await authenticatedPost('/aspsps', {
+      country: 'GR',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(jws.default.sign).toHaveBeenCalledTimes(1);
+
+    const signInput = jws.default.sign.mock.calls[0][0];
+    expect(signInput.privateKey).toContain('-----BEGIN PRIVATE KEY-----\n');
+    expect(signInput.privateKey).toContain('\n-----END PRIVATE KEY-----');
+    expect(signInput.privateKey).not.toContain(
+      '-----BEGIN PRIVATE KEY----- abc def -----END PRIVATE KEY-----',
+    );
+  });
+
   it('stores callback code and authorizes on poll-auth by state', async () => {
     global.fetch.mockResolvedValueOnce({
       ok: true,
