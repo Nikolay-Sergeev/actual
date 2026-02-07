@@ -1,5 +1,4 @@
-// @ts-strict-ignore
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { TextArea } from 'react-aria-components';
 import { Trans, useTranslation } from 'react-i18next';
 

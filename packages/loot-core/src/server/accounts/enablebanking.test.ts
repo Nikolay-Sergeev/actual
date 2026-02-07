@@ -1,4 +1,3 @@
-// @ts-strict-ignore
 import * as asyncStorage from '../../platform/server/asyncStorage';
 import * as db from '../db';
 import { runHandler } from '../mutators';
@@ -8,9 +7,11 @@ import { app } from './app';
 import { syncAccount } from './sync';
 import * as bankSync from './sync';
 
+declare const emptyDatabase: (avoidUpdate?: boolean) => () => Promise<void>;
+
 describe('Enable Banking integration (loot-core)', () => {
   beforeEach(async () => {
-    await global.emptyDatabase()();
+    await emptyDatabase()();
     vi.spyOn(asyncStorage, 'getItem').mockResolvedValue('test-token');
   });
 
@@ -103,6 +104,9 @@ describe('Enable Banking integration (loot-core)', () => {
     expect(account.account_sync_source).toBe('enableBanking');
     expect(account.account_id).toBe('remote-account-1');
 
+    if (!account.bank) {
+      throw new Error('Expected linked account to have a bank row');
+    }
     const bank = await db.first<{ bank_id: string; name: string }>(
       'SELECT bank_id, name FROM banks WHERE id = ?',
       [account.bank],

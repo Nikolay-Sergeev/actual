@@ -1,5 +1,4 @@
-// @ts-strict-ignore
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 
 import { Button } from '@actual-app/components/button';
@@ -32,6 +31,20 @@ type EnableBankingAspspOption = EnableBankingAspsp & {
   id: string;
 };
 
+function isEnableBankingAspsp(value: unknown): value is EnableBankingAspsp {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  // Minimal shape check; server is the source of truth.
+  return (
+    'name' in value &&
+    typeof (value as { name?: unknown }).name === 'string' &&
+    'country' in value &&
+    typeof (value as { country?: unknown }).country === 'string'
+  );
+}
+
 function useAvailableAspsps(country?: string) {
   const [aspsps, setAspsps] = useState<EnableBankingAspspOption[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -60,8 +73,13 @@ function useAvailableAspsps(country?: string) {
         return;
       }
 
-      const items = Array.isArray(primaryResponse.data?.aspsps)
-        ? primaryResponse.data.aspsps
+      const data: unknown = primaryResponse.data;
+      const itemsRaw =
+        data && typeof data === 'object' && 'aspsps' in data
+          ? (data as { aspsps?: unknown }).aspsps
+          : undefined;
+      const items = Array.isArray(itemsRaw)
+        ? itemsRaw.filter(isEnableBankingAspsp)
         : [];
       setAspsps(
         items.map(aspsp => ({
@@ -172,6 +190,11 @@ export function EnableBankingExternalMsgModal({
   }
 
   async function onContinue() {
+    if (!data.current) {
+      setError({ code: 'unknown', message: t('Missing authorization data.') });
+      return;
+    }
+
     setWaiting('accounts');
     await onSuccess(data.current);
     setWaiting(null);
