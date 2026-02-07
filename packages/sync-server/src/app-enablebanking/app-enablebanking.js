@@ -27,6 +27,7 @@ const DEFAULT_CONSENT_VALIDITY_SECONDS = 24 * 60 * 60;
 const AUTO_PAGINATION_MAX_PAGES = 20;
 const MAX_AUTH_STATE_LENGTH = 256;
 const MAX_CALLBACK_ERROR_DESCRIPTION_LENGTH = 2048;
+const AUTH_CACHE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const ENABLE_BANKING_ENVIRONMENTS = new Set(['SANDBOX', 'PRODUCTION']);
 const TEMP_PENDING_AUTH_PREFIX = 'enablebanking_tmp_pending_auth:';
 const TEMP_AUTH_RESULT_PREFIX = 'enablebanking_tmp_auth_result:';
@@ -255,6 +256,15 @@ function cleanupTemporaryEntries(prefix, ttlMs) {
 }
 
 function cleanupAuthCache() {
+  const now = Date.now();
+  if (
+    typeof cleanupAuthCache.lastCleanupAt === 'number' &&
+    now - cleanupAuthCache.lastCleanupAt < AUTH_CACHE_CLEANUP_INTERVAL_MS
+  ) {
+    return;
+  }
+  cleanupAuthCache.lastCleanupAt = now;
+
   cleanupTemporaryEntries(TEMP_PENDING_AUTH_PREFIX, AUTH_STATE_TTL_MS);
   cleanupTemporaryEntries(TEMP_AUTH_RESULT_PREFIX, AUTH_STATE_TTL_MS);
   cleanupTemporaryEntries(
@@ -262,6 +272,8 @@ function cleanupAuthCache() {
     SESSION_PSU_HEADERS_TTL_MS,
   );
 }
+
+cleanupAuthCache.lastCleanupAt = 0;
 
 function getQueryString(query) {
   const params = new URLSearchParams();
