@@ -19,6 +19,7 @@ module.exports = {
     const whitelist = [
       'Actual',
       'GoCardless',
+      'Enable Banking',
       'SimpleFIN',
       'Pluggy.ai',
       'YNAB',

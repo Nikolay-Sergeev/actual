@@ -280,15 +280,73 @@ function normalizeAccount({ account, aspsp, fallbackSessionAccount = null }) {
   };
 }
 
-function getAuthErrorData(error) {
+const ENABLE_BANKING_AUTH_EXPIRED_ERRORS = new Set([
+  'EXPIRED_SESSION',
+  'REVOKED_SESSION',
+  'SESSION_DOES_NOT_EXIST',
+  'WRONG_SESSION_STATUS',
+  'EXPIRED_AUTHORIZATION_CODE',
+  'WRONG_AUTHORIZATION_CODE',
+  'ALREADY_AUTHORIZED',
+  'CLOSED_SESSION',
+]);
+
+const ENABLE_BANKING_BAD_CREDENTIAL_ERRORS = new Set([
+  'WRONG_CREDENTIALS_PROVIDED',
+  'ACCESS_DENIED',
+  'AUTHORIZATION_NOT_PROVIDED',
+  'UNAUTHORIZED_ACCESS',
+]);
+
+function getEnableBankingErrorCode(error) {
+  return String(error?.details?.error || '').toUpperCase();
+}
+
+function mapEnableBankingSyncError(error) {
   if (error instanceof EnableBankingApiError) {
+    const providerErrorCode = getEnableBankingErrorCode(error);
+    const reason =
+      error.details?.error_description ||
+      error.details?.message ||
+      error.message;
+
+    if (providerErrorCode === 'ASPSP_RATE_LIMIT_EXCEEDED' || error.status === 429) {
+      return {
+        error_type: 'RATE_LIMIT_EXCEEDED',
+        error_code: 'ENABLEBANKING_ERROR',
+        status: 'rejected',
+        reason,
+        details: error.details ?? null,
+      };
+    }
+
+    if (providerErrorCode === 'ASPSP_TIMEOUT' || error.status === 408) {
+      return {
+        error_type: 'TIMED_OUT',
+        error_code: 'TIMED_OUT',
+        status: 'rejected',
+        reason,
+        details: error.details ?? null,
+      };
+    }
+
+    if (
+      ENABLE_BANKING_AUTH_EXPIRED_ERRORS.has(providerErrorCode) ||
+      ENABLE_BANKING_BAD_CREDENTIAL_ERRORS.has(providerErrorCode)
+    ) {
+      return {
+        error_type: 'ITEM_ERROR',
+        error_code: 'ITEM_LOGIN_REQUIRED',
+        status: 'expired',
+        reason,
+        details: error.details ?? null,
+      };
+    }
+
     return {
       error_type: 'SYNC_ERROR',
-      error_code: error.details?.error || String(error.status || 'UNKNOWN'),
-      reason:
-        error.details?.error_description ||
-        error.details?.message ||
-        error.message,
+      error_code: providerErrorCode || String(error.status || 'UNKNOWN'),
+      reason,
       details: error.details ?? null,
     };
   }
@@ -585,7 +643,7 @@ app.post('/transactions', async (req, res) => {
   } catch (error) {
     res.send({
       status: 'ok',
-      data: getAuthErrorData(error),
+      data: mapEnableBankingSyncError(error),
     });
   }
 });
