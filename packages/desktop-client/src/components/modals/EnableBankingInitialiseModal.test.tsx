@@ -67,7 +67,8 @@ describe('EnableBankingInitialiseModal', () => {
         'secret-set',
         { name: 'enablebanking_environment', value: 'PRODUCTION' },
       ],
-      ['secret-set', { name: 'enablebanking_redirectUrl', value: '' }],
+      // Empty redirect URL unsets the secret so the server can infer it from request headers.
+      ['secret-set', { name: 'enablebanking_redirectUrl', value: null }],
     ]);
     expect(onSuccess).toHaveBeenCalledTimes(1);
   });
