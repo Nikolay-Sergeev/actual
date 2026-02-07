@@ -907,11 +907,10 @@ app.post(
     }
 
     validateRedirectUrl(callbackUrl);
+    const trimmedState = typeof state === 'string' ? state.trim() : '';
     const normalizedState =
-      typeof state === 'string' &&
-      state.trim() !== '' &&
-      state.length <= MAX_AUTH_STATE_LENGTH
-        ? state.trim()
+      trimmedState !== '' && trimmedState.length <= MAX_AUTH_STATE_LENGTH
+        ? trimmedState
         : randomUUID();
     const normalizedAccess = await getNormalizedAccess({
       aspsp,
