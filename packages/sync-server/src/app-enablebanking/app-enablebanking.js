@@ -484,6 +484,11 @@ function getPsuHeadersFromRequest(req) {
   return Object.keys(psuHeaders).length > 0 ? psuHeaders : null;
 }
 
+function mergePsuHeaders(...sources) {
+  const merged = Object.assign({}, ...sources.filter(Boolean));
+  return Object.keys(merged).length > 0 ? merged : null;
+}
+
 function getPublicOrigin(req) {
   const forwardedProto = getHeaderValue(req, 'x-forwarded-proto');
   const forwardedHost = getHeaderValue(req, 'x-forwarded-host');
@@ -913,6 +918,7 @@ app.post(
   handleError(async (req, res) => {
     cleanupAuthCache();
 
+    const requestPsuHeaders = getPsuHeadersFromRequest(req);
     const { authorizationId, state } = req.body || {};
     const pending = authorizationId
       ? getTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, authorizationId)
@@ -940,8 +946,11 @@ app.post(
       const { session: activeSession, accounts: normalizedAccounts } =
         await getNormalizedSessionAccounts({
           sessionId: pending.sessionId,
-          psuHeaders:
-            pending.psuHeaders || getSessionPsuHeaders(pending.sessionId),
+          psuHeaders: mergePsuHeaders(
+            pending.psuHeaders,
+            requestPsuHeaders,
+            getSessionPsuHeaders(pending.sessionId),
+          ),
         });
 
       if (normalizedAccounts.length > 0) {
@@ -1020,7 +1029,11 @@ app.post(
       return;
     }
 
-    const psuHeaders = callbackResult.psuHeaders || pending?.psuHeaders || null;
+    const psuHeaders = mergePsuHeaders(
+      callbackResult.psuHeaders,
+      requestPsuHeaders,
+      pending?.psuHeaders,
+    );
     const session = await enableBankingRequest({
       path: '/sessions',
       method: 'POST',

@@ -197,6 +197,45 @@ describe('app-enablebanking', () => {
     expect(authOptions.headers['Psu-User-Agent']).toBe('EnableBankingCreateUA');
   });
 
+  it('forwards PSU headers from poll-auth request to Enable Banking /sessions when callback does not provide them', async () => {
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          session_id: 'session-poll-ua',
+          aspsp: { name: 'Test Bank', country: 'LT' },
+          accounts: [
+            { uid: 'acc-1', identification_hash: 'hash-1', name: 'A' },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          uid: 'acc-1',
+          name: 'A',
+          identification_hash: 'hash-1',
+        }),
+      });
+
+    const callbackRes = await request(app).get(
+      '/callback?state=state-poll-ua&code=auth-code-poll-ua',
+    );
+    expect(callbackRes.statusCode).toBe(200);
+
+    const pollRes = await request(app)
+      .post('/poll-auth')
+      .set('x-actual-token', 'valid-token')
+      .set('Accept-Language', 'fi-FI')
+      .send({ state: 'state-poll-ua' });
+    expect(pollRes.statusCode).toBe(200);
+    expect(pollRes.body.status).toBe('ok');
+    expect(pollRes.body.data.status).toBe('authorized');
+
+    const [, sessionOptions] = global.fetch.mock.calls[0];
+    expect(sessionOptions.headers['Psu-Accept-language']).toBe('fi-FI');
+  });
+
   it('authorizes on poll-auth by authorizationId when state is not provided', async () => {
     global.fetch
       .mockResolvedValueOnce({
