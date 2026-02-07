@@ -1465,6 +1465,7 @@ async function unlinkAccount({ id }: { id: AccountEntity['id'] }) {
   }
 
   const isGoCardless = accRow.account_sync_source === 'goCardless';
+  const isEnableBanking = accRow.account_sync_source === 'enableBanking';
 
   await db.updateAccount({
     id,
@@ -1476,7 +1477,7 @@ async function unlinkAccount({ id }: { id: AccountEntity['id'] }) {
     account_sync_source: null,
   });
 
-  if (isGoCardless === false) {
+  if (isGoCardless === false && isEnableBanking === false) {
     return;
   }
 
@@ -1486,7 +1487,7 @@ async function unlinkAccount({ id }: { id: AccountEntity['id'] }) {
   );
 
   // No more accounts are associated with this bank. We can remove
-  // it from GoCardless.
+  // it from the upstream bank sync provider.
   const userToken = await asyncStorage.getItem('user-token');
   if (!userToken) {
     return 'ok';
@@ -1507,18 +1508,30 @@ async function unlinkAccount({ id }: { id: AccountEntity['id'] }) {
       throw new Error('Failed to get server config.');
     }
 
-    const requisitionId = bank.bank_id;
-
     try {
-      await post(
-        serverConfig.GOCARDLESS_SERVER + '/remove-account',
-        {
-          requisitionId,
-        },
-        {
-          'X-ACTUAL-TOKEN': userToken,
-        },
-      );
+      if (isGoCardless) {
+        const requisitionId = bank.bank_id;
+        await post(
+          serverConfig.GOCARDLESS_SERVER + '/remove-account',
+          {
+            requisitionId,
+          },
+          {
+            'X-ACTUAL-TOKEN': userToken,
+          },
+        );
+      } else if (isEnableBanking) {
+        const sessionId = bank.bank_id;
+        await post(
+          serverConfig.ENABLEBANKING_SERVER + '/remove-account',
+          {
+            sessionId,
+          },
+          {
+            'X-ACTUAL-TOKEN': userToken,
+          },
+        );
+      }
     } catch (error) {
       logger.log({ error });
     }
