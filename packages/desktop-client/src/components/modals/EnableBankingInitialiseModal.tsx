@@ -5,6 +5,7 @@ import { Trans, useTranslation } from 'react-i18next';
 import { ButtonWithLoading } from '@actual-app/components/button';
 import { InitialFocus } from '@actual-app/components/initial-focus';
 import { baseInputStyle, Input } from '@actual-app/components/input';
+import { Select } from '@actual-app/components/select';
 import { Text } from '@actual-app/components/text';
 import { View } from '@actual-app/components/view';
 
@@ -165,23 +166,25 @@ export function EnableBankingInitialiseModal({
           />
           <View style={{ display: 'flex', gap: 10 }}>
             <Text>
+              <Trans>Enter your credentials to enable bank sync.</Trans>
+            </Text>
+            <Text>
               <Trans>
-                To enable bank sync with Enable Banking, register an application
-                and create credentials in the{' '}
+                Create an application in the{' '}
                 <Link
                   variant="external"
-                  to="https://enablebanking.com"
+                  to="https://enablebanking.com/cp/applications"
                   linkColor="purple"
                 >
                   Enable Banking control panel
                 </Link>
-                .
+                , then paste the details here.
               </Trans>
             </Text>
 
             <FormField>
               <FormLabel
-                title={t('Application ID:')}
+                title={t('App ID')}
                 htmlFor="enablebanking-application-id-field"
               />
               <InitialFocus>
@@ -199,13 +202,13 @@ export function EnableBankingInitialiseModal({
 
             <FormField>
               <FormLabel
-                title={t('Private Key (PEM):')}
+                title={t('Private key (PEM)')}
                 htmlFor="enablebanking-private-key-field"
               />
               <TextArea
                 id="enablebanking-private-key-field"
                 value={privateKey}
-                aria-label={t('Private Key (PEM)')}
+                aria-label={t('Private key (PEM)')}
                 onChange={event => {
                   setPrivateKey(event.currentTarget.value);
                   setIsValid(true);
@@ -222,15 +225,17 @@ export function EnableBankingInitialiseModal({
 
             <FormField>
               <FormLabel
-                title={t('Environment:')}
+                title={t('Environment')}
                 htmlFor="enablebanking-environment-field"
               />
-              <Input
+              <Select
                 id="enablebanking-environment-field"
-                type="text"
                 value={environment}
-                placeholder="SANDBOX"
-                onChangeValue={value => {
+                options={[
+                  ['PRODUCTION', t('PRODUCTION')],
+                  ['SANDBOX', t('SANDBOX')],
+                ]}
+                onChange={value => {
                   setEnvironment(value);
                   setIsValid(true);
                 }}
@@ -239,7 +244,7 @@ export function EnableBankingInitialiseModal({
 
             <FormField>
               <FormLabel
-                title={t('Callback URL (redirect_url):')}
+                title={t('Redirect URL')}
                 htmlFor="enablebanking-redirect-url-field"
               />
               <Input

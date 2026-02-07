@@ -27,15 +27,15 @@ describe('EnableBankingInitialiseModal', () => {
 
     const user = userEvent.setup();
     await user.type(
-      screen.getByLabelText(/Application ID:/i),
+      screen.getByLabelText(/App ID/i),
       'test-application-id',
     );
     await user.type(
-      screen.getByLabelText(/Private Key \(PEM\):/i),
+      screen.getByLabelText(/Private key \(PEM\)/i),
       '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
     );
-    await user.clear(screen.getByLabelText(/Environment:/i));
-    await user.type(screen.getByLabelText(/Environment:/i), 'PRODUCTION');
+    await user.click(screen.getByLabelText(/Environment/i));
+    await user.click(screen.getByRole('button', { name: /PRODUCTION/i }));
     await user.click(
       screen.getByRole('button', { name: /Save and continue/i }),
     );
@@ -75,7 +75,7 @@ describe('EnableBankingInitialiseModal', () => {
     expect(onSuccess).toHaveBeenCalledTimes(1);
   });
 
-  it('shows validation error and does not submit for invalid environment', async () => {
+  it('shows PRODUCTION and SANDBOX environment options', async () => {
     vi.mocked(send).mockResolvedValue({});
     const onSuccess = vi.fn();
 
@@ -84,22 +84,12 @@ describe('EnableBankingInitialiseModal', () => {
     });
 
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText(/Application ID:/i), 'app-id');
-    await user.type(screen.getByLabelText(/Private Key \(PEM\):/i), 'secret');
-    await user.clear(screen.getByLabelText(/Environment:/i));
-    await user.type(screen.getByLabelText(/Environment:/i), 'INVALID');
-    await user.click(
-      screen.getByRole('button', { name: /Save and continue/i }),
-    );
+    await user.click(screen.getByLabelText(/Environment/i));
 
     expect(
-      screen.getByText(/Environment must be either SANDBOX or PRODUCTION\./i),
+      screen.getByRole('button', { name: /PRODUCTION/i }),
     ).toBeInTheDocument();
-    // Status call happens on mount, but invalid input should prevent secret writes.
-    const secretSetCalls = vi
-      .mocked(send)
-      .mock.calls.filter(([method]) => method === 'secret-set');
-    expect(secretSetCalls).toHaveLength(0);
+    expect(screen.getByRole('button', { name: /SANDBOX/i })).toBeInTheDocument();
     expect(onSuccess).not.toHaveBeenCalled();
   });
 });

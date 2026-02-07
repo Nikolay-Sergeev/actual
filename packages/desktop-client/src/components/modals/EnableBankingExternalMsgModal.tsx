@@ -205,14 +205,14 @@ export function EnableBankingExternalMsgModal({
       {({ state: { close } }) => (
         <>
           <ModalHeader
-            title={t('Link Your Bank')}
+            title={t('Link your bank')}
             rightContent={<ModalCloseButton onPress={close} />}
           />
           <View>
             <Paragraph style={{ fontSize: 15 }}>
               <Trans>
-                To link your bank account, you will be redirected to a new page
-                where Enable Banking will ask to connect to your bank.
+                You'll be redirected to Enable Banking to choose your bank and
+                approve access. Then you'll return to Actual Budget.
               </Trans>
             </Paragraph>
 
@@ -252,7 +252,7 @@ export function EnableBankingExternalMsgModal({
               <View style={{ gap: 10 }}>
                 <FormField>
                   <FormLabel
-                    title={t('Choose your country:')}
+                    title={t('Country:')}
                     htmlFor="enable-banking-country-field"
                   />
                   <Autocomplete
@@ -289,7 +289,7 @@ export function EnableBankingExternalMsgModal({
                   ) : (
                     <FormField>
                       <FormLabel
-                        title={t('Choose your bank:')}
+                        title={t('Bank:')}
                         htmlFor="enable-banking-bank-field"
                       />
                       <Autocomplete
@@ -319,7 +319,7 @@ export function EnableBankingExternalMsgModal({
                   onPress={onJump}
                   isDisabled={!selectedAspsp}
                 >
-                  <Trans>Link bank in browser</Trans> &rarr;
+                  <Trans>Connect bank</Trans> &rarr;
                 </Button>
               </View>
             ) : (
