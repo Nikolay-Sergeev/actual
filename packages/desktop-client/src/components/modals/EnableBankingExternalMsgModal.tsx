@@ -15,6 +15,7 @@ import {
 
 import { Error } from '@desktop-client/components/alerts';
 import { Autocomplete } from '@desktop-client/components/autocomplete/Autocomplete';
+import { Link } from '@desktop-client/components/common/Link';
 import {
   Modal,
   ModalCloseButton,
@@ -233,6 +234,20 @@ export function EnableBankingExternalMsgModal({
                         ? t('Loading accounts...')
                         : null}
                 </View>
+
+                {waiting === 'browser' && (
+                  <Link
+                    variant="text"
+                    onClick={onJump}
+                    style={{ marginTop: 10 }}
+                  >
+                    (
+                    <Trans>
+                      Account linking not opening in a new tab? Click here
+                    </Trans>
+                    )
+                  </Link>
+                )}
               </View>
             ) : success ? (
               <Button

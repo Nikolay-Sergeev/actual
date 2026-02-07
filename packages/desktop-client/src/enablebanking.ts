@@ -1,4 +1,5 @@
 import { send } from 'loot-core/platform/client/fetch';
+import { isElectron } from 'loot-core/shared/environment';
 import {
   type EnableBankingAuthPollResult,
   type EnableBankingAuthResult,
@@ -24,6 +25,12 @@ function _authorize(
         name: 'enablebanking-external-msg',
         options: {
           onMoveExternal: async ({ aspsp }) => {
+            // In Firefox, `window.open` is frequently blocked if called after an `await`
+            // (user activation is lost). Open a placeholder window synchronously first.
+            const popup = !isElectron()
+              ? window.open('about:blank', '_blank')
+              : null;
+
             const resp: EnableBankingCreateAuthResult = await send(
               'enablebanking-create-auth',
               {
@@ -42,6 +49,10 @@ function _authorize(
               !url ||
               !authorizationId
             ) {
+              if (popup && popup.closed === false) {
+                popup.close();
+              }
+
               const message =
                 ('reason' in resp && resp.reason) ||
                 ('error_description' in resp && resp.error_description) ||
@@ -54,7 +65,17 @@ function _authorize(
               };
             }
 
-            window.Actual.openURLInBrowser(url);
+            if (popup && popup.closed === false) {
+              try {
+                // Avoid leaving a pointless `about:blank` entry in history.
+                popup.location.replace(url);
+              } catch {
+                // If the popup got navigated/closed, fall back.
+                window.Actual.openURLInBrowser(url);
+              }
+            } else {
+              window.Actual.openURLInBrowser(url);
+            }
 
             const pollResult: EnableBankingAuthPollResult = await send(
               'enablebanking-poll-auth',

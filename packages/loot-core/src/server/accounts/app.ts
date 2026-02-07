@@ -641,7 +641,9 @@ async function checkSecret(name: string) {
 }
 
 let stopPolling = false;
-let stopEnableBankingPolling = false;
+// Used to cancel in-flight polling when the modal is closed or the user retries.
+// Each new poll increments the generation; previous poll loops stop when stale.
+let enableBankingPollGeneration = 0;
 
 async function pollGoCardlessWebToken({
   requisitionId,
@@ -732,7 +734,7 @@ async function pollEnableBankingAuth({
   if (!userToken) return { error: 'unknown' };
 
   const startTime = Date.now();
-  stopEnableBankingPolling = false;
+  const pollGeneration = ++enableBankingPollGeneration;
 
   async function getData(
     cb: (
@@ -743,12 +745,7 @@ async function pollEnableBankingAuth({
         | { status: 'success'; data: EnableBankingAuthResult },
     ) => void,
   ) {
-    if (stopEnableBankingPolling) {
-      return;
-    }
-
-    if (Date.now() - startTime >= 1000 * 60 * 10) {
-      cb({ status: 'timeout' });
+    if (pollGeneration !== enableBankingPollGeneration) {
       return;
     }
 
@@ -766,6 +763,13 @@ async function pollEnableBankingAuth({
     );
 
     if (!data || data.status === 'pending') {
+      // Check timeout *after* we've attempted a request. In Firefox, the worker
+      // can be suspended while the user is in the bank consent tab; when it
+      // resumes we want to perform a final check instead of timing out early.
+      if (Date.now() - startTime >= 1000 * 60 * 10) {
+        cb({ status: 'timeout' });
+        return;
+      }
       setTimeout(() => getData(cb), 3000);
       return;
     }
@@ -815,7 +819,7 @@ async function pollEnableBankingAuth({
 }
 
 async function stopEnableBankingAuthPolling() {
-  stopEnableBankingPolling = true;
+  enableBankingPollGeneration += 1;
   return 'ok';
 }
 
