@@ -611,6 +611,10 @@ const ENABLE_BANKING_BAD_CREDENTIAL_ERRORS = new Set([
   'AUTHORIZATION_NOT_PROVIDED',
   'UNAUTHORIZED_ACCESS',
 ]);
+const ENABLE_BANKING_PENDING_SESSION_STATUSES = new Set([
+  'PENDING_AUTHORIZATION',
+  'RETURNED_FROM_BANK',
+]);
 
 function getEnableBankingErrorCode(error) {
   return String(error?.details?.error || '').toUpperCase();
@@ -862,6 +866,60 @@ app.post(
       return;
     }
 
+    if (pending?.sessionId) {
+      setTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, authorizationId, {
+        ...pending,
+        updatedAt: Date.now(),
+      });
+
+      const { session: activeSession, accounts: normalizedAccounts } =
+        await getNormalizedSessionAccounts({
+          sessionId: pending.sessionId,
+          psuHeaders:
+            pending.psuHeaders || getSessionPsuHeaders(pending.sessionId),
+        });
+
+      if (normalizedAccounts.length > 0) {
+        deleteTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, authorizationId);
+
+        res.send({
+          status: 'ok',
+          data: {
+            status: 'authorized',
+            ...activeSession,
+            accounts: normalizedAccounts,
+          },
+        });
+        return;
+      }
+
+      if (ENABLE_BANKING_PENDING_SESSION_STATUSES.has(activeSession.status)) {
+        res.send({
+          status: 'ok',
+          data: {
+            status: 'pending',
+            session_id: pending.sessionId,
+          },
+        });
+        return;
+      }
+
+      deleteTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, authorizationId);
+
+      res.send({
+        status: 'ok',
+        data: {
+          status: 'error',
+          error: 'NO_ACCOUNTS_ADDED',
+          error_description:
+            'Authorization completed but no accounts were shared by the bank. Please retry and make sure at least one account is selected in the bank consent flow.',
+          session_id: pending.sessionId,
+          session_status: activeSession.status,
+        },
+      });
+      return;
+    }
+
     const callbackResult = getTemporaryEntry(
       TEMP_AUTH_RESULT_PREFIX,
       authState,
@@ -907,11 +965,18 @@ app.post(
         updatedAt: Date.now(),
       });
     }
+    deleteTemporaryEntry(TEMP_AUTH_RESULT_PREFIX, authState);
 
     if (authorizationId) {
-      deleteTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, authorizationId);
+      setTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, authorizationId, {
+        ...(pending ?? {}),
+        state: authState,
+        sessionId: session.session_id,
+        psuHeaders: callbackResult.psuHeaders || pending?.psuHeaders || null,
+        createdAt: Number(pending?.createdAt ?? Date.now()),
+        updatedAt: Date.now(),
+      });
     }
-    deleteTemporaryEntry(TEMP_AUTH_RESULT_PREFIX, authState);
 
     const { accounts: normalizedAccounts } = await getNormalizedSessionAccounts(
       {
@@ -922,6 +987,21 @@ app.post(
     );
 
     if (normalizedAccounts.length === 0) {
+      if (ENABLE_BANKING_PENDING_SESSION_STATUSES.has(session.status)) {
+        res.send({
+          status: 'ok',
+          data: {
+            status: 'pending',
+            session_id: session.session_id,
+          },
+        });
+        return;
+      }
+
+      if (authorizationId) {
+        deleteTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, authorizationId);
+      }
+
       res.send({
         status: 'ok',
         data: {
@@ -943,6 +1023,10 @@ app.post(
         accounts: normalizedAccounts,
       },
     });
+
+    if (authorizationId) {
+      deleteTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, authorizationId);
+    }
   }),
 );
 
