@@ -763,13 +763,15 @@ app.post(
       psuId,
     } = req.body || {};
     const { redirectUrl: configuredRedirectUrl } = getEnableBankingConfig();
+    // Prefer callback URL passed by Actual for the active server origin.
     const callbackUrl =
-      configuredRedirectUrl || redirectUrl || getDefaultRedirectUrl(req);
+      redirectUrl || configuredRedirectUrl || getDefaultRedirectUrl(req);
 
     if (!callbackUrl) {
       throw new EnableBankingApiError('WRONG_REQUEST_PARAMETERS', 400, {
         error: 'WRONG_REQUEST_PARAMETERS',
-        message: 'Missing redirect URL',
+        message:
+          'Missing redirect URL. Set enablebanking_redirectUrl secret or send requests with a valid Host header.',
       });
     }
 
@@ -875,6 +877,11 @@ app.post(
     }
 
     if (callbackResult.error) {
+      if (authorizationId) {
+        deleteTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, authorizationId);
+      }
+      deleteTemporaryEntry(TEMP_AUTH_RESULT_PREFIX, authState);
+
       res.send({
         status: 'ok',
         data: {
