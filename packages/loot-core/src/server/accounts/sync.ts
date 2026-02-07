@@ -297,7 +297,7 @@ async function downloadPluggyAiTransactions(
 }
 
 async function downloadEnableBankingTransactions(
-  acctId: AccountEntity['id'],
+  acctId: string,
   bankId: string,
   since: string,
 ) {

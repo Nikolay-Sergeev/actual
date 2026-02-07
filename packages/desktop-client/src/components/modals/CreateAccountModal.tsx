@@ -163,7 +163,7 @@ export function CreateAccountModal({
       return;
     }
 
-    await authorizeEnableBanking(dispatch);
+    authorizeEnableBanking(dispatch);
   };
 
   const onConnectPluggyAi = async () => {

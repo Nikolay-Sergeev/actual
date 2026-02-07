@@ -25,6 +25,8 @@ const AUTH_STATE_TTL_MS = 30 * 60 * 1000;
 const SESSION_PSU_HEADERS_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_CONSENT_VALIDITY_SECONDS = 24 * 60 * 60;
 const AUTO_PAGINATION_MAX_PAGES = 20;
+const MAX_AUTH_STATE_LENGTH = 256;
+const MAX_CALLBACK_ERROR_DESCRIPTION_LENGTH = 2048;
 const ENABLE_BANKING_ENVIRONMENTS = new Set(['SANDBOX', 'PRODUCTION']);
 const TEMP_PENDING_AUTH_PREFIX = 'enablebanking_tmp_pending_auth:';
 const TEMP_AUTH_RESULT_PREFIX = 'enablebanking_tmp_auth_result:';
@@ -491,7 +493,7 @@ function getPsuHeadersFromRequest(req) {
     ...(accept ? { 'Psu-Accept': accept } : {}),
     ...(acceptCharset ? { 'Psu-Accept-Charset': acceptCharset } : {}),
     ...(acceptEncoding ? { 'Psu-Accept-Encoding': acceptEncoding } : {}),
-    ...(acceptLanguage ? { 'Psu-Accept-language': acceptLanguage } : {}),
+    ...(acceptLanguage ? { 'Psu-Accept-Language': acceptLanguage } : {}),
   };
 
   return Object.keys(psuHeaders).length > 0 ? psuHeaders : null;
@@ -527,13 +529,28 @@ function getDefaultRedirectUrl(req) {
 }
 
 function validateRedirectUrl(redirectUrl) {
+  let parsed;
   try {
     // Throws if malformed
-    new URL(redirectUrl);
+    parsed = new URL(redirectUrl);
   } catch {
     throw new EnableBankingApiError('WRONG_REQUEST_PARAMETERS', 400, {
       error: 'WRONG_REQUEST_PARAMETERS',
       message: 'Invalid redirect URL',
+    });
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new EnableBankingApiError('WRONG_REQUEST_PARAMETERS', 400, {
+      error: 'WRONG_REQUEST_PARAMETERS',
+      message: 'Redirect URL must use http or https',
+    });
+  }
+
+  if (parsed.username || parsed.password) {
+    throw new EnableBankingApiError('WRONG_REQUEST_PARAMETERS', 400, {
+      error: 'WRONG_REQUEST_PARAMETERS',
+      message: 'Redirect URL must not include credentials',
     });
   }
 }
@@ -767,12 +784,18 @@ app.get('/callback', (req, res) => {
   } = req.query ?? {};
   const psuHeaders = getPsuHeadersFromRequest(req);
 
-  if (typeof state === 'string' && state.length > 0) {
+  if (
+    typeof state === 'string' &&
+    state.length > 0 &&
+    state.length <= MAX_AUTH_STATE_LENGTH
+  ) {
     setTemporaryEntry(TEMP_AUTH_RESULT_PREFIX, state, {
       code: typeof code === 'string' ? code : null,
       error: typeof error === 'string' ? error : null,
       errorDescription:
-        typeof errorDescription === 'string' ? errorDescription : null,
+        typeof errorDescription === 'string'
+          ? errorDescription.slice(0, MAX_CALLBACK_ERROR_DESCRIPTION_LENGTH)
+          : null,
       psuHeaders,
       updatedAt: Date.now(),
     });
@@ -834,7 +857,7 @@ app.post(
       aspsp,
       access,
       redirectUrl,
-      state = randomUUID(),
+      state,
       psuType,
       authMethod,
       credentials,
@@ -861,6 +884,12 @@ app.post(
     }
 
     validateRedirectUrl(callbackUrl);
+    const normalizedState =
+      typeof state === 'string' &&
+      state.trim() !== '' &&
+      state.length <= MAX_AUTH_STATE_LENGTH
+        ? state.trim()
+        : randomUUID();
     const normalizedAccess = await getNormalizedAccess({
       aspsp,
       access,
@@ -877,7 +906,7 @@ app.post(
           aspsp,
           access: normalizedAccess,
           redirect_url: callbackUrl,
-          state,
+          state: normalizedState,
           ...(psuType ? { psu_type: psuType } : {}),
           ...(authMethod ? { auth_method: authMethod } : {}),
           ...(credentials ? { credentials } : {}),
@@ -908,7 +937,7 @@ app.post(
 
     if (data.authorization_id) {
       setTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, data.authorization_id, {
-        state,
+        state: normalizedState,
         psuHeaders: initialPsuHeaders,
         createdAt: Date.now(),
         updatedAt: Date.now(),
@@ -920,7 +949,7 @@ app.post(
       data: {
         ...data,
         redirect_url: callbackUrl,
-        state,
+        state: normalizedState,
       },
     });
   }),

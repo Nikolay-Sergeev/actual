@@ -233,7 +233,7 @@ describe('app-enablebanking', () => {
     expect(pollRes.body.data.status).toBe('authorized');
 
     const [, sessionOptions] = global.fetch.mock.calls[0];
-    expect(sessionOptions.headers['Psu-Accept-language']).toBe('fi-FI');
+    expect(sessionOptions.headers['Psu-Accept-Language']).toBe('fi-FI');
   });
 
   it('authorizes on poll-auth by authorizationId when state is not provided', async () => {
@@ -627,7 +627,7 @@ describe('app-enablebanking', () => {
     expect(transactionsOptions.headers['Psu-User-Agent']).toBe(
       'EnableBankingTestUA',
     );
-    expect(transactionsOptions.headers['Psu-Accept-language']).toBe('en-US');
+    expect(transactionsOptions.headers['Psu-Accept-Language']).toBe('en-US');
     expect(transactionsOptions.headers['Psu-Referer']).toBe(
       'https://enablebanking.com',
     );
