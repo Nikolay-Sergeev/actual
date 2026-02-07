@@ -7,6 +7,8 @@ import {
   type AccountEntity,
   type CategoryEntity,
   type CategoryGroupEntity,
+  type EnableBankingAspsp,
+  type EnableBankingAuthResult,
   type GoCardlessToken,
   type NewRuleEntity,
   type NewUserEntity,
@@ -121,6 +123,20 @@ export type Modal =
         >;
         onClose?: (() => void) | undefined;
         onSuccess: (data: GoCardlessToken) => Promise<void>;
+      };
+    }
+  | {
+      name: 'enablebanking-external-msg';
+      options: {
+        onMoveExternal: (arg: {
+          aspsp: EnableBankingAspsp;
+        }) => Promise<
+          | { error: 'timeout' }
+          | { error: 'unknown'; message?: string }
+          | { data: EnableBankingAuthResult }
+        >;
+        onClose?: (() => void) | undefined;
+        onSuccess: (data: EnableBankingAuthResult) => Promise<void>;
       };
     }
   | {

@@ -15,12 +15,14 @@ import { format as formatDate, parseISO } from 'date-fns';
 import { currentDay, subDays } from 'loot-core/shared/months';
 import {
   type AccountEntity,
+  type SyncServerEnableBankingAccount,
   type SyncServerGoCardlessAccount,
   type SyncServerPluggyAiAccount,
   type SyncServerSimpleFinAccount,
 } from 'loot-core/types/models';
 
 import {
+  linkAccountEnableBanking,
   linkAccount,
   linkAccountPluggyAi,
   linkAccountSimpleFin,
@@ -85,22 +87,32 @@ function isNewAccountOption(
 export type SelectLinkedAccountsModalProps =
   | {
       requisitionId: string;
+      sessionId?: undefined;
       externalAccounts: SyncServerGoCardlessAccount[];
       syncSource: 'goCardless';
     }
   | {
       requisitionId?: undefined;
+      sessionId?: undefined;
       externalAccounts: SyncServerSimpleFinAccount[];
       syncSource: 'simpleFin';
     }
   | {
       requisitionId?: undefined;
+      sessionId?: undefined;
       externalAccounts: SyncServerPluggyAiAccount[];
       syncSource: 'pluggyai';
+    }
+  | {
+      requisitionId?: undefined;
+      sessionId: string;
+      externalAccounts: SyncServerEnableBankingAccount[];
+      syncSource: 'enableBanking';
     };
 
 export function SelectLinkedAccountsModal({
   requisitionId = undefined,
+  sessionId = undefined,
   externalAccounts,
   syncSource,
 }: SelectLinkedAccountsModalProps) {
@@ -129,10 +141,16 @@ export function SelectLinkedAccountsModal({
             requisitionId: requisitionId!,
             externalAccounts: toSort as SyncServerGoCardlessAccount[],
           };
+        case 'enableBanking':
+          return {
+            syncSource: 'enableBanking',
+            sessionId: sessionId!,
+            externalAccounts: toSort as SyncServerEnableBankingAccount[],
+          };
         default:
           throw new Error(`Unrecognized sync source: ${syncSource}`);
       }
-    }, [externalAccounts, syncSource, requisitionId]);
+    }, [externalAccounts, syncSource, requisitionId, sessionId]);
 
   const { t } = useTranslation();
   const { isNarrowWidth } = useResponsive();
@@ -224,6 +242,26 @@ export function SelectLinkedAccountsModal({
               startingBalance,
             }),
           );
+        } else if (
+          propsWithSortedExternalAccounts.syncSource === 'enableBanking'
+        ) {
+          dispatch(
+            linkAccountEnableBanking({
+              sessionId: propsWithSortedExternalAccounts.sessionId,
+              externalAccount:
+                propsWithSortedExternalAccounts.externalAccounts[
+                  externalAccountIndex
+                ],
+              upgradingId:
+                chosenLocalAccountId !== addOnBudgetAccountOption.id &&
+                chosenLocalAccountId !== addOffBudgetAccountOption.id
+                  ? chosenLocalAccountId
+                  : undefined,
+              offBudget,
+              startingDate,
+              startingBalance,
+            }),
+          );
         } else {
           dispatch(
             linkAccount({
@@ -257,7 +295,8 @@ export function SelectLinkedAccountsModal({
     externalAccount:
       | SyncServerGoCardlessAccount
       | SyncServerSimpleFinAccount
-      | SyncServerPluggyAiAccount,
+      | SyncServerPluggyAiAccount
+      | SyncServerEnableBankingAccount,
     localAccountId: string | null | undefined,
   ) {
     setChosenAccounts(accounts => {
@@ -481,7 +520,8 @@ export function SelectLinkedAccountsModal({
 type ExternalAccount =
   | SyncServerGoCardlessAccount
   | SyncServerSimpleFinAccount
-  | SyncServerPluggyAiAccount;
+  | SyncServerPluggyAiAccount
+  | SyncServerEnableBankingAccount;
 
 type StartingBalanceInfo = {
   date: string;
@@ -719,7 +759,8 @@ function getInstitutionName(
   externalAccount:
     | SyncServerGoCardlessAccount
     | SyncServerSimpleFinAccount
-    | SyncServerPluggyAiAccount,
+    | SyncServerPluggyAiAccount
+    | SyncServerEnableBankingAccount,
 ) {
   if (typeof externalAccount?.institution === 'string') {
     return externalAccount?.institution ?? '';

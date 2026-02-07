@@ -26,9 +26,11 @@ import {
 import { useMultiuserEnabled } from '@desktop-client/components/ServerContext';
 import { authorizeBank } from '@desktop-client/gocardless';
 import { useGoCardlessStatus } from '@desktop-client/hooks/useGoCardlessStatus';
+import { useEnableBankingStatus } from '@desktop-client/hooks/useEnableBankingStatus';
 import { usePluggyAiStatus } from '@desktop-client/hooks/usePluggyAiStatus';
 import { useSimpleFinStatus } from '@desktop-client/hooks/useSimpleFinStatus';
 import { useSyncServerStatus } from '@desktop-client/hooks/useSyncServerStatus';
+import { authorizeEnableBanking } from '@desktop-client/enablebanking';
 import {
   pushModal,
   type Modal as ModalType,
@@ -57,6 +59,8 @@ export function CreateAccountModal({
   const [isPluggyAiSetupComplete, setIsPluggyAiSetupComplete] = useState<
     boolean | null
   >(null);
+  const [isEnableBankingSetupComplete, setIsEnableBankingSetupComplete] =
+    useState<boolean | null>(null);
   const { hasPermission } = useAuth();
   const multiuserEnabled = useMultiuserEnabled();
 
@@ -141,6 +145,26 @@ export function CreateAccountModal({
     }
 
     setLoadingSimpleFinAccounts(false);
+  };
+
+  const onConnectEnableBanking = async () => {
+    if (!isEnableBankingSetupComplete) {
+      dispatch(
+        addNotification({
+          notification: {
+            type: 'error',
+            title: t('Enable Banking is not configured'),
+            message: t(
+              'Set `enablebanking_applicationId`, `enablebanking_privateKey`, and `enablebanking_environment` secrets first.',
+            ),
+            timeout: 7000,
+          },
+        }),
+      );
+      return;
+    }
+
+    await authorizeEnableBanking(dispatch);
   };
 
   const onConnectPluggyAi = async () => {
@@ -305,6 +329,25 @@ export function CreateAccountModal({
     });
   };
 
+  const onEnableBankingReset = () => {
+    send('secret-set', {
+      name: 'enablebanking_applicationId',
+      value: null,
+    }).then(() => {
+      send('secret-set', {
+        name: 'enablebanking_privateKey',
+        value: null,
+      }).then(() => {
+        send('secret-set', {
+          name: 'enablebanking_environment',
+          value: null,
+        }).then(() => {
+          setIsEnableBankingSetupComplete(false);
+        });
+      });
+    });
+  };
+
   const onCreateLocalAccount = () => {
     dispatch(pushModal({ modal: { name: 'add-local-account' } }));
   };
@@ -323,6 +366,11 @@ export function CreateAccountModal({
   useEffect(() => {
     setIsPluggyAiSetupComplete(configuredPluggyAi);
   }, [configuredPluggyAi]);
+
+  const { configuredEnableBanking } = useEnableBankingStatus();
+  useEffect(() => {
+    setIsEnableBankingSetupComplete(configuredEnableBanking);
+  }, [configuredEnableBanking]);
 
   let title = t('Add account');
   const [loadingSimpleFinAccounts, setLoadingSimpleFinAccounts] =
@@ -444,6 +492,71 @@ export function CreateAccountModal({
                           to automatically download transactions. GoCardless
                           provides reliable, up-to-date information from
                           hundreds of banks.
+                        </Trans>
+                      </Text>
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          gap: 10,
+                          marginTop: '18px',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <ButtonWithLoading
+                          isDisabled={syncServerStatus !== 'online'}
+                          style={{
+                            padding: '10px 0',
+                            fontSize: 15,
+                            fontWeight: 600,
+                            flex: 1,
+                          }}
+                          onPress={onConnectEnableBanking}
+                        >
+                          {isEnableBankingSetupComplete
+                            ? t('Link bank account with Enable Banking')
+                            : t('Set up Enable Banking for bank sync')}
+                        </ButtonWithLoading>
+                        {isEnableBankingSetupComplete && (
+                          <DialogTrigger>
+                            <Button
+                              variant="bare"
+                              aria-label={t('Enable Banking menu')}
+                            >
+                              <SvgDotsHorizontalTriple
+                                width={15}
+                                height={15}
+                                style={{ transform: 'rotateZ(90deg)' }}
+                              />
+                            </Button>
+                            <Popover>
+                              <Dialog>
+                                <Menu
+                                  onMenuSelect={item => {
+                                    if (item === 'reconfigure') {
+                                      onEnableBankingReset();
+                                    }
+                                  }}
+                                  items={[
+                                    {
+                                      name: 'reconfigure',
+                                      text: t(
+                                        'Reset Enable Banking credentials',
+                                      ),
+                                    },
+                                  ]}
+                                />
+                              </Dialog>
+                            </Popover>
+                          </DialogTrigger>
+                        )}
+                      </View>
+                      <Text style={{ lineHeight: '1.4em', fontSize: 15 }}>
+                        <Trans>
+                          <strong>
+                            Link an <em>open banking</em> compatible account
+                          </strong>{' '}
+                          to automatically download transactions using Enable
+                          Banking.
                         </Trans>
                       </Text>
                       <View
@@ -580,6 +693,7 @@ export function CreateAccountModal({
                   )}
 
                   {(!isGoCardlessSetupComplete ||
+                    !isEnableBankingSetupComplete ||
                     !isSimpleFinSetupComplete ||
                     !isPluggyAiSetupComplete) &&
                     !canSetSecrets && (
@@ -590,6 +704,9 @@ export function CreateAccountModal({
                         </Trans>{' '}
                         {[
                           isGoCardlessSetupComplete ? '' : 'GoCardless',
+                          isEnableBankingSetupComplete
+                            ? ''
+                            : 'Enable Banking',
                           isSimpleFinSetupComplete ? '' : 'SimpleFIN',
                           isPluggyAiSetupComplete ? '' : 'Pluggy.ai',
                         ]
