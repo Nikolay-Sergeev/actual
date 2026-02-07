@@ -78,6 +78,7 @@ export type SyncServerGoCardlessAccount = {
   balance: number;
   institution: string | { name: string };
   account_id: string;
+  identification_hash?: string;
   mask: string;
   name: string;
   official_name: string;
