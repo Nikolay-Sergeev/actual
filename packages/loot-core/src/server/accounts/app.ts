@@ -72,6 +72,7 @@ export type AccountHandlers = {
   'enablebanking-status': typeof enableBankingStatus;
   'simplefin-accounts': typeof simpleFinAccounts;
   'pluggyai-accounts': typeof pluggyAiAccounts;
+  'enablebanking-accounts': typeof enableBankingAccounts;
   'enablebanking-get-aspsps': typeof getEnableBankingAspsps;
   'gocardless-get-banks': typeof getGoCardlessBanks;
   'gocardless-create-web-token': typeof createGoCardlessWebToken;
@@ -945,6 +946,32 @@ async function pluggyAiAccounts() {
   }
 }
 
+async function enableBankingAccounts({ sessionId }: { sessionId: string }) {
+  const userToken = await asyncStorage.getItem('user-token');
+
+  if (!userToken) {
+    return { error: 'unauthorized' };
+  }
+
+  const serverConfig = getServer();
+  if (!serverConfig) {
+    throw new Error('Failed to get server config.');
+  }
+
+  try {
+    return await post(
+      serverConfig.ENABLEBANKING_SERVER + '/accounts',
+      { sessionId },
+      {
+        'X-ACTUAL-TOKEN': userToken,
+      },
+      60000,
+    );
+  } catch {
+    return { error_code: 'TIMED_OUT' };
+  }
+}
+
 async function getEnableBankingAspsps({
   country,
 }: {
@@ -1526,6 +1553,7 @@ app.method('pluggyai-status', pluggyAiStatus);
 app.method('enablebanking-status', enableBankingStatus);
 app.method('simplefin-accounts', simpleFinAccounts);
 app.method('pluggyai-accounts', pluggyAiAccounts);
+app.method('enablebanking-accounts', enableBankingAccounts);
 app.method('enablebanking-get-aspsps', getEnableBankingAspsps);
 app.method('gocardless-get-banks', getGoCardlessBanks);
 app.method('gocardless-create-web-token', createGoCardlessWebToken);
