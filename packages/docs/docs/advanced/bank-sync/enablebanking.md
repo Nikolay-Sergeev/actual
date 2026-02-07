@@ -29,6 +29,7 @@ This guide covers how to connect Actual to Enable Banking for account syncing.
 4. Click **Save and continue**.
 
 For reference, these values are stored in server secrets as:
+
 - `enablebanking_applicationId`
 - `enablebanking_privateKey`
 - `enablebanking_environment`

@@ -41,23 +41,47 @@ function useAvailableAspsps(country?: string) {
     async function fetch() {
       setIsError(false);
 
-      if (!country) {
+      setIsLoading(true);
+
+      const primaryQuery = country ? { country } : {};
+      const primaryResponse = await sendCatch(
+        'enablebanking-get-aspsps',
+        primaryQuery,
+      );
+
+      if (primaryResponse.error) {
+        setIsError(true);
         setAspsps([]);
         setIsLoading(false);
         return;
       }
 
-      setIsLoading(true);
+      let items = Array.isArray(primaryResponse.data?.aspsps)
+        ? primaryResponse.data.aspsps
+        : [];
 
-      const { data, error } = await sendCatch('enablebanking-get-aspsps', {
-        country,
-      });
+      // Country-specific coverage may be sparse in some environments.
+      // Fall back to fetching all ASPSPs so bank selection still works.
+      if (country && items.length === 0) {
+        const fallbackResponse = await sendCatch(
+          'enablebanking-get-aspsps',
+          {},
+        );
+        if (fallbackResponse.error) {
+          setIsError(true);
+          setAspsps([]);
+          setIsLoading(false);
+          return;
+        }
 
-      if (error) {
-        setIsError(true);
+        items = Array.isArray(fallbackResponse.data?.aspsps)
+          ? fallbackResponse.data.aspsps
+          : [];
+      }
+
+      if (items.length === 0) {
         setAspsps([]);
       } else {
-        const items = Array.isArray(data?.aspsps) ? data.aspsps : [];
         setAspsps(
           items.map(aspsp => ({
             ...aspsp,
@@ -69,7 +93,7 @@ function useAvailableAspsps(country?: string) {
       setIsLoading(false);
     }
 
-    fetch();
+    void fetch();
   }, [country]);
 
   return {
@@ -256,6 +280,13 @@ export function EnableBankingExternalMsgModal({
                   country &&
                   (isAspspsLoading ? (
                     t('Loading banks...')
+                  ) : aspspOptions.length === 0 ? (
+                    <Error>
+                      <Trans>
+                        No banks were found for this selection. Try another
+                        country.
+                      </Trans>
+                    </Error>
                   ) : (
                     <FormField>
                       <FormLabel
