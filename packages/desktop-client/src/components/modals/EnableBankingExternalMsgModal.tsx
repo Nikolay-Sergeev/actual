@@ -36,18 +36,24 @@ function useAvailableAspsps(country?: string) {
   const [aspsps, setAspsps] = useState<EnableBankingAspspOption[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isError, setIsError] = useState(false);
+  const [hasOnlyMockAspsps, setHasOnlyMockAspsps] = useState(false);
 
   useEffect(() => {
     async function fetch() {
       setIsError(false);
+      setHasOnlyMockAspsps(false);
+
+      if (!country) {
+        setAspsps([]);
+        setIsLoading(false);
+        return;
+      }
 
       setIsLoading(true);
 
-      const primaryQuery = country ? { country } : {};
-      const primaryResponse = await sendCatch(
-        'enablebanking-get-aspsps',
-        primaryQuery,
-      );
+      const primaryResponse = await sendCatch('enablebanking-get-aspsps', {
+        country,
+      });
 
       if (primaryResponse.error) {
         setIsError(true);
@@ -56,34 +62,19 @@ function useAvailableAspsps(country?: string) {
         return;
       }
 
-      let items = Array.isArray(primaryResponse.data?.aspsps)
+      const items = Array.isArray(primaryResponse.data?.aspsps)
         ? primaryResponse.data.aspsps
         : [];
+      const nonMockItems = items.filter(
+        aspsp => aspsp.name.trim().toLowerCase() !== 'mock aspsp',
+      );
 
-      // Country-specific coverage may be sparse in some environments.
-      // Fall back to fetching all ASPSPs so bank selection still works.
-      if (country && items.length === 0) {
-        const fallbackResponse = await sendCatch(
-          'enablebanking-get-aspsps',
-          {},
-        );
-        if (fallbackResponse.error) {
-          setIsError(true);
-          setAspsps([]);
-          setIsLoading(false);
-          return;
-        }
-
-        items = Array.isArray(fallbackResponse.data?.aspsps)
-          ? fallbackResponse.data.aspsps
-          : [];
-      }
-
-      if (items.length === 0) {
+      if (nonMockItems.length === 0) {
+        setHasOnlyMockAspsps(items.length > 0);
         setAspsps([]);
       } else {
         setAspsps(
-          items.map(aspsp => ({
+          nonMockItems.map(aspsp => ({
             ...aspsp,
             id: `${aspsp.country}:${aspsp.name}`,
           })),
@@ -100,6 +91,7 @@ function useAvailableAspsps(country?: string) {
     data: aspsps,
     isLoading,
     isError,
+    hasOnlyMockAspsps,
   };
 }
 
@@ -155,6 +147,7 @@ export function EnableBankingExternalMsgModal({
     data: aspspOptions,
     isLoading: isAspspsLoading,
     isError: isAspspError,
+    hasOnlyMockAspsps,
   } = useAvailableAspsps(country);
   const {
     configuredEnableBanking: isConfigured,
@@ -280,6 +273,14 @@ export function EnableBankingExternalMsgModal({
                   country &&
                   (isAspspsLoading ? (
                     t('Loading banks...')
+                  ) : hasOnlyMockAspsps ? (
+                    <Error>
+                      <Trans>
+                        No live banks were returned for this country. Your
+                        current Enable Banking app appears to have sandbox-only
+                        coverage for this selection.
+                      </Trans>
+                    </Error>
                   ) : aspspOptions.length === 0 ? (
                     <Error>
                       <Trans>
