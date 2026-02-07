@@ -4,6 +4,7 @@ import * as monthUtils from '../shared/months';
 import type {
   _SyncFields,
   AccountEntity,
+  AccountSyncSource,
   CategoryEntity,
   CategoryGroupEntity,
   TransactionEntity,
@@ -15,6 +16,7 @@ export function generateAccount(
   name: AccountEntity['name'],
   isConnected?: boolean,
   offbudget?: boolean,
+  syncSource: AccountSyncSource = 'goCardless',
 ): AccountEntity {
   const offlineAccount: AccountEntity = {
     id: uuidv4(),
@@ -39,7 +41,7 @@ export function generateAccount(
       official_name: 'boa',
       balance_available: 0,
       balance_limit: 0,
-      account_sync_source: 'goCardless',
+      account_sync_source: syncSource,
       last_sync: new Date().getTime().toString(),
     };
   }

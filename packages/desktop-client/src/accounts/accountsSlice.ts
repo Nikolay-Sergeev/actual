@@ -686,6 +686,7 @@ export const actions = {
   linkAccount,
   linkAccountSimpleFin,
   linkAccountPluggyAi,
+  linkAccountEnableBanking,
   moveAccount,
   unlinkAccount,
   syncAccounts,
