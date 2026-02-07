@@ -153,6 +153,26 @@ function getTemporaryEntry(prefix, key) {
   }
 }
 
+function getTemporaryEntries(prefix) {
+  const rows = getAccountDb().all(
+    'SELECT name, value FROM secrets WHERE name LIKE ?',
+    [`${prefix}%`],
+  );
+
+  const entries = [];
+  for (const row of rows) {
+    try {
+      entries.push({
+        key: String(row.name).slice(prefix.length),
+        value: JSON.parse(row.value),
+      });
+    } catch {
+      // Ignore malformed temporary rows.
+    }
+  }
+  return entries;
+}
+
 function setTemporaryEntry(prefix, key, value) {
   if (!key) {
     return;
@@ -680,6 +700,40 @@ function mapEnableBankingSyncError(error) {
   };
 }
 
+function findCallbackResultForPendingAuth({ authState, authorizationId, pending }) {
+  const directMatch = getTemporaryEntry(TEMP_AUTH_RESULT_PREFIX, authState);
+  if (directMatch) {
+    return { state: authState, result: directMatch };
+  }
+
+  if (!authorizationId || !pending || pending.sessionId) {
+    return null;
+  }
+
+  const createdAt = Number(pending.createdAt ?? 0);
+  if (!Number.isFinite(createdAt) || createdAt <= 0) {
+    return null;
+  }
+
+  const candidates = getTemporaryEntries(TEMP_AUTH_RESULT_PREFIX).filter(
+    entry => {
+      const updatedAt = Number(entry.value?.updatedAt ?? 0);
+      return (
+        Number.isFinite(updatedAt) &&
+        updatedAt >= createdAt &&
+        (entry.value?.code || entry.value?.error)
+      );
+    },
+  );
+
+  // If there is exactly one callback newer than this auth request, use it.
+  if (candidates.length === 1) {
+    return { state: candidates[0].key, result: candidates[0].value };
+  }
+
+  return null;
+}
+
 app.get('/callback', (req, res) => {
   cleanupAuthCache();
 
@@ -921,11 +975,13 @@ app.post(
       return;
     }
 
-    const callbackResult = getTemporaryEntry(
-      TEMP_AUTH_RESULT_PREFIX,
+    const callbackStateAndResult = findCallbackResultForPendingAuth({
       authState,
-    );
-    if (!callbackResult) {
+      authorizationId,
+      pending,
+    });
+
+    if (!callbackStateAndResult) {
       res.send({
         status: 'ok',
         data: {
@@ -934,12 +990,14 @@ app.post(
       });
       return;
     }
+    const { state: callbackState, result: callbackResult } =
+      callbackStateAndResult;
 
     if (callbackResult.error) {
       if (authorizationId) {
         deleteTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, authorizationId);
       }
-      deleteTemporaryEntry(TEMP_AUTH_RESULT_PREFIX, authState);
+      deleteTemporaryEntry(TEMP_AUTH_RESULT_PREFIX, callbackState);
 
       res.send({
         status: 'ok',
@@ -966,12 +1024,12 @@ app.post(
         updatedAt: Date.now(),
       });
     }
-    deleteTemporaryEntry(TEMP_AUTH_RESULT_PREFIX, authState);
+    deleteTemporaryEntry(TEMP_AUTH_RESULT_PREFIX, callbackState);
 
     if (authorizationId) {
       setTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, authorizationId, {
         ...(pending ?? {}),
-        state: authState,
+        state: callbackState,
         sessionId: session.session_id,
         psuHeaders: callbackResult.psuHeaders || pending?.psuHeaders || null,
         createdAt: Number(pending?.createdAt ?? Date.now()),

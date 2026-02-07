@@ -98,17 +98,26 @@ describe('app-enablebanking', () => {
   });
 
   it('stores callback code and authorizes on poll-auth by state', async () => {
-    global.fetch.mockResolvedValueOnce({
-      ok: true,
-      json: async () => ({
-        session_id: 'session-123',
-        aspsp: { name: 'Test Bank', country: 'LT' },
-        accounts: [
-          { uid: 'acc-1', identification_hash: 'hash-1', name: 'A' },
-          { identification_hash: 'hash-without-uid', name: 'B' },
-        ],
-      }),
-    });
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          session_id: 'session-123',
+          aspsp: { name: 'Test Bank', country: 'LT' },
+          accounts: [
+            { uid: 'acc-1', identification_hash: 'hash-1', name: 'A' },
+            { identification_hash: 'hash-without-uid', name: 'B' },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          uid: 'acc-1',
+          name: 'A',
+          identification_hash: 'hash-1',
+        }),
+      });
 
     const callbackRes = await request(app).get(
       '/callback?state=state-123&code=auth-code-123',
@@ -194,6 +203,65 @@ describe('app-enablebanking', () => {
     expect(pollRes.body.status).toBe('ok');
     expect(pollRes.body.data.status).toBe('authorized');
     expect(pollRes.body.data.session_id).toBe('session-xyz');
+  });
+
+  it('authorizes on poll-auth by authorizationId when callback state differs', async () => {
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          aspsps: [
+            {
+              name: 'Test Bank',
+              country: 'LT',
+              maximum_consent_validity: 86400,
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          url: 'https://enablebanking.com/auth',
+          authorization_id: 'auth-state-mismatch',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          session_id: 'session-state-mismatch',
+          aspsp: { name: 'Test Bank', country: 'LT' },
+          accounts: [
+            { uid: 'acc-1', identification_hash: 'hash-1', name: 'A' },
+          ],
+        }),
+      });
+
+    const createRes = await authenticatedPost('/create-auth', {
+      aspsp: { name: 'Test Bank', country: 'LT' },
+      access: {
+        balances: true,
+        transactions: true,
+        valid_until: '2026-02-01T00:00:00.000Z',
+      },
+      redirectUrl: 'https://example.com/callback',
+      state: 'state-sent',
+      psuType: 'personal',
+    });
+
+    expect(createRes.statusCode).toBe(200);
+    expect(createRes.body.data.authorization_id).toBe('auth-state-mismatch');
+
+    await request(app).get('/callback?state=state-returned&code=auth-code-xyz');
+
+    const pollRes = await authenticatedPost('/poll-auth', {
+      authorizationId: 'auth-state-mismatch',
+    });
+
+    expect(pollRes.statusCode).toBe(200);
+    expect(pollRes.body.status).toBe('ok');
+    expect(pollRes.body.data.status).toBe('authorized');
+    expect(pollRes.body.data.session_id).toBe('session-state-mismatch');
   });
 
   it('prefers configured redirectUrl secret over request redirectUrl', async () => {
