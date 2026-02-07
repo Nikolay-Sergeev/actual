@@ -27,6 +27,7 @@ const DEFAULT_CONSENT_VALIDITY_SECONDS = 24 * 60 * 60;
 const AUTO_PAGINATION_MAX_PAGES = 20;
 const MAX_AUTH_STATE_LENGTH = 256;
 const MAX_CALLBACK_ERROR_DESCRIPTION_LENGTH = 2048;
+const MAX_CALLBACK_LOOKBACK_MS = 10 * 60 * 1000;
 const AUTH_CACHE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const ENABLE_BANKING_ENVIRONMENTS = new Set(['SANDBOX', 'PRODUCTION']);
 const TEMP_PENDING_AUTH_PREFIX = 'enablebanking_tmp_pending_auth:';
@@ -770,6 +771,24 @@ function mapEnableBankingSyncError(error) {
   };
 }
 
+function psuHeadersAreCompatible(a, b) {
+  if (!a || !b) {
+    return true;
+  }
+
+  const keysToCheck = [
+    'Psu-User-Agent',
+    'Psu-Accept-Language',
+    'Psu-Ip-Address',
+  ];
+  for (const key of keysToCheck) {
+    if (a[key] && b[key] && String(a[key]) !== String(b[key])) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function findCallbackResultForPendingAuth({
   authState,
   authorizationId,
@@ -802,7 +821,36 @@ function findCallbackResultForPendingAuth({
 
   // If there is exactly one callback newer than this auth request, use it.
   if (candidates.length === 1) {
-    return { state: candidates[0].key, result: candidates[0].value };
+    const candidate = candidates[0];
+    const candidateUpdatedAt = Number(candidate.value?.updatedAt ?? 0);
+    if (!Number.isFinite(candidateUpdatedAt)) {
+      return null;
+    }
+
+    // Avoid accidentally binding to an unrelated callback if multiple auth flows are active.
+    const pendingWithSameState = getTemporaryEntries(TEMP_PENDING_AUTH_PREFIX)
+      .filter(entry => entry.value?.state === candidate.key)
+      .map(entry => entry.key);
+    if (
+      pendingWithSameState.length > 0 &&
+      pendingWithSameState.some(id => id !== authorizationId)
+    ) {
+      return null;
+    }
+
+    // Only accept callbacks that happened within the polling window.
+    if (candidateUpdatedAt - createdAt > MAX_CALLBACK_LOOKBACK_MS) {
+      return null;
+    }
+
+    // If we have PSU headers from either side, require them to be compatible.
+    if (
+      !psuHeadersAreCompatible(candidate.value?.psuHeaders, pending.psuHeaders)
+    ) {
+      return null;
+    }
+
+    return { state: candidate.key, result: candidate.value };
   }
 
   return null;

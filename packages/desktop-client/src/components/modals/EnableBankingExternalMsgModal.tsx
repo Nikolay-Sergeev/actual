@@ -126,6 +126,8 @@ export function EnableBankingExternalMsgModal({
 }: EnableBankingExternalMsgModalProps) {
   const { t } = useTranslation();
   const [language] = useGlobalPref('language');
+  const jumpInFlightRef = useRef(false);
+  const continueInFlightRef = useRef(false);
 
   const browserTimezone =
     Intl.DateTimeFormat().resolvedOptions().timeZone || '';
@@ -159,42 +161,58 @@ export function EnableBankingExternalMsgModal({
   const selectedAspsp = aspspOptions.find(a => a.id === aspspId);
 
   async function onJump() {
+    if (jumpInFlightRef.current) {
+      return;
+    }
     if (!selectedAspsp) {
       return;
     }
 
+    jumpInFlightRef.current = true;
     setError(null);
     setWaiting('browser');
 
-    const res = await onMoveExternal({
-      aspsp: {
-        name: selectedAspsp.name,
-        country: selectedAspsp.country,
-      },
-    });
-    if ('error' in res) {
-      setError({
-        code: res.error,
-        message: 'message' in res ? res.message : undefined,
+    try {
+      const res = await onMoveExternal({
+        aspsp: {
+          name: selectedAspsp.name,
+          country: selectedAspsp.country,
+        },
       });
-      setWaiting(null);
-      return;
-    }
+      if ('error' in res) {
+        setError({
+          code: res.error,
+          message: 'message' in res ? res.message : undefined,
+        });
+        setWaiting(null);
+        return;
+      }
 
-    data.current = res.data;
-    setWaiting(null);
-    setSuccess(true);
+      data.current = res.data;
+      setWaiting(null);
+      setSuccess(true);
+    } finally {
+      jumpInFlightRef.current = false;
+    }
   }
 
   async function onContinue() {
+    if (continueInFlightRef.current) {
+      return;
+    }
     if (!data.current) {
       setError({ code: 'unknown', message: t('Missing authorization data.') });
       return;
     }
 
+    continueInFlightRef.current = true;
     setWaiting('accounts');
-    await onSuccess(data.current);
-    setWaiting(null);
+    try {
+      await onSuccess(data.current);
+      setWaiting(null);
+    } finally {
+      continueInFlightRef.current = false;
+    }
   }
 
   return (

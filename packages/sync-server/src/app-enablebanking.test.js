@@ -295,6 +295,81 @@ describe('app-enablebanking', () => {
     expect(pollRes.body.data.session_id).toBe('session-xyz');
   });
 
+  it('does not bind callback state from another pending authorizationId', async () => {
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          aspsps: [
+            {
+              name: 'Test Bank',
+              country: 'LT',
+              maximum_consent_validity: 86400,
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          url: 'https://enablebanking.com/auth',
+          authorization_id: 'auth-1',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          aspsps: [
+            {
+              name: 'Test Bank',
+              country: 'LT',
+              maximum_consent_validity: 86400,
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          url: 'https://enablebanking.com/auth',
+          authorization_id: 'auth-2',
+        }),
+      });
+
+    const authRes1 = await authenticatedPost('/create-auth', {
+      aspsp: { name: 'Test Bank', country: 'LT' },
+      access: { balances: true, transactions: true, valid_until: '2099-01-01' },
+      state: 'state-1',
+      psuType: 'personal',
+    });
+    expect(authRes1.body.status).toBe('ok');
+    expect(authRes1.body.data.authorization_id).toBe('auth-1');
+
+    const authRes2 = await authenticatedPost('/create-auth', {
+      aspsp: { name: 'Test Bank', country: 'LT' },
+      access: { balances: true, transactions: true, valid_until: '2099-01-01' },
+      state: 'state-2',
+      psuType: 'personal',
+    });
+    expect(authRes2.body.status).toBe('ok');
+    expect(authRes2.body.data.authorization_id).toBe('auth-2');
+
+    // Only the second flow gets a callback.
+    const callbackRes = await request(app).get(
+      '/callback?state=state-2&code=auth-code-2',
+    );
+    expect(callbackRes.statusCode).toBe(200);
+
+    // Polling the first authorizationId should not incorrectly bind to state-2.
+    const pollRes = await request(app)
+      .post('/poll-auth')
+      .set('x-actual-token', 'valid-token')
+      .send({ authorizationId: 'auth-1', state: 'state-1' });
+    expect(pollRes.statusCode).toBe(200);
+    expect(pollRes.body.status).toBe('ok');
+    expect(pollRes.body.data.status).toBe('pending');
+  });
+
   it('authorizes on poll-auth by authorizationId when callback state differs', async () => {
     global.fetch
       .mockResolvedValueOnce({
