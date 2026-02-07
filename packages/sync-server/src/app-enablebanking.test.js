@@ -76,7 +76,10 @@ describe('app-enablebanking', () => {
       json: async () => ({
         session_id: 'session-123',
         aspsp: { name: 'Test Bank', country: 'LT' },
-        accounts: [{ uid: 'acc-1', identification_hash: 'hash-1', name: 'A' }],
+        accounts: [
+          { uid: 'acc-1', identification_hash: 'hash-1', name: 'A' },
+          { identification_hash: 'hash-without-uid', name: 'B' },
+        ],
       }),
     });
 
@@ -105,6 +108,166 @@ describe('app-enablebanking', () => {
     });
     expect(secondPoll.statusCode).toBe(200);
     expect(secondPoll.body.data.status).toBe('pending');
+  });
+
+  it('caps valid_until in create-auth by ASPSP maximum consent validity', async () => {
+    vi.useFakeTimers();
+    try {
+      const now = new Date('2026-01-01T00:00:00.000Z');
+      vi.setSystemTime(now);
+
+      global.fetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            aspsps: [
+              {
+                name: 'Test Bank',
+                country: 'LT',
+                maximum_consent_validity: 3600,
+              },
+            ],
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({
+            url: 'https://enablebanking.com/auth',
+            authorization_id: 'auth-123',
+          }),
+        });
+
+      const res = await authenticatedPost('/create-auth', {
+        aspsp: { name: 'Test Bank', country: 'LT' },
+        access: {
+          balances: true,
+          transactions: true,
+          valid_until: '2026-02-01T00:00:00.000Z',
+        },
+        redirectUrl: 'https://example.com/callback',
+        state: 'state-123',
+        psuType: 'personal',
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+
+      const [, authOptions] = global.fetch.mock.calls[1];
+      const authBody = JSON.parse(authOptions.body);
+      const validUntilMs = Date.parse(authBody.access.valid_until);
+      expect(validUntilMs).toBeLessThanOrEqual(now.getTime() + 3600 * 1000);
+      expect(validUntilMs).toBeGreaterThanOrEqual(now.getTime());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('autopaginates transactions when continuation key is not provided', async () => {
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          transactions: [
+            {
+              status: 'BOOK',
+              booking_date: '2024-01-02',
+              creditor: { name: 'Store 1' },
+              transaction_amount: { amount: '-10.00', currency: 'EUR' },
+              entry_reference: 'tx-1',
+            },
+          ],
+          continuation_key: 'page-2-token',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          transactions: [
+            {
+              status: 'BOOK',
+              booking_date: '2024-01-01',
+              creditor: { name: 'Store 2' },
+              transaction_amount: { amount: '-20.00', currency: 'EUR' },
+              entry_reference: 'tx-2',
+            },
+          ],
+          continuation_key: null,
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          balances: [
+            {
+              balance_type: 'CLBD',
+              balance_amount: { amount: '100.00', currency: 'EUR' },
+            },
+          ],
+        }),
+      });
+
+    const res = await authenticatedPost('/transactions', {
+      accountId: 'acc-1',
+      startDate: '2024-01-01',
+      endDate: '2024-01-31',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.transactions.all).toHaveLength(2);
+    expect(res.body.data.continuation_key).toBeNull();
+
+    const [secondTransactionsUrl] = global.fetch.mock.calls[1];
+    expect(secondTransactionsUrl).toContain('continuation_key=page-2-token');
+  });
+
+  it('captures PSU headers from callback and forwards them to transactions API calls', async () => {
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          session_id: 'session-psu',
+          aspsp: { name: 'Test Bank', country: 'LT' },
+          accounts: [
+            { uid: 'acc-1', identification_hash: 'hash-1', name: 'A' },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          transactions: [],
+          continuation_key: null,
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          balances: [],
+        }),
+      });
+
+    await request(app)
+      .get('/callback?state=state-psu&code=auth-code-psu')
+      .set('User-Agent', 'EnableBankingTestUA')
+      .set('Accept-Language', 'en-US')
+      .set('Referer', 'https://enablebanking.com');
+
+    await authenticatedPost('/poll-auth', { state: 'state-psu' });
+
+    await authenticatedPost('/transactions', {
+      accountId: 'acc-1',
+      sessionId: 'session-psu',
+      startDate: '2024-01-01',
+    });
+
+    const [, transactionsOptions] = global.fetch.mock.calls[1];
+    expect(transactionsOptions.headers['Psu-User-Agent']).toBe(
+      'EnableBankingTestUA',
+    );
+    expect(transactionsOptions.headers['Psu-Accept-language']).toBe('en-US');
+    expect(transactionsOptions.headers['Psu-Referer']).toBe(
+      'https://enablebanking.com',
+    );
   });
 
   it('forwards continuation_key and returns continuation_key in /transactions', async () => {

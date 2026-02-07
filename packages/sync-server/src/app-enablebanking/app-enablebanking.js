@@ -21,10 +21,14 @@ const ENABLE_BANKING_ISSUER = 'enablebanking.com';
 const ENABLE_BANKING_AUDIENCE = 'api.enablebanking.com';
 const MAX_JWT_TTL_SECONDS = 24 * 60 * 60;
 const AUTH_STATE_TTL_MS = 30 * 60 * 1000;
+const SESSION_PSU_HEADERS_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_CONSENT_VALIDITY_SECONDS = 24 * 60 * 60;
+const AUTO_PAGINATION_MAX_PAGES = 20;
 const ENABLE_BANKING_ENVIRONMENTS = new Set(['SANDBOX', 'PRODUCTION']);
 
 const pendingAuthById = new Map();
 const authResultByState = new Map();
+const sessionPsuHeadersById = new Map();
 
 class EnableBankingApiError extends Error {
   constructor(message, status, details) {
@@ -115,6 +119,12 @@ function cleanupAuthCache() {
       authResultByState.delete(key);
     }
   }
+
+  for (const [key, value] of sessionPsuHeadersById.entries()) {
+    if (value.updatedAt + SESSION_PSU_HEADERS_TTL_MS < now) {
+      sessionPsuHeadersById.delete(key);
+    }
+  }
 }
 
 function getQueryString(query) {
@@ -134,6 +144,7 @@ async function enableBankingRequest({
   method = 'GET',
   query = null,
   body = null,
+  headers = null,
 }) {
   const jwt = createEnableBankingJwt();
 
@@ -144,6 +155,7 @@ async function enableBankingRequest({
       Authorization: `Bearer ${jwt}`,
       Accept: 'application/json',
       ...(body ? { 'Content-Type': 'application/json' } : {}),
+      ...(headers ?? {}),
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -263,12 +275,10 @@ function accountDisplayName(account) {
 }
 
 function normalizeAccount({ account, aspsp, fallbackSessionAccount = null }) {
+  const uid = account.uid || fallbackSessionAccount?.uid || null;
+
   return {
-    account_id:
-      account.uid ||
-      account.identification_hash ||
-      fallbackSessionAccount?.uid ||
-      randomUUID(),
+    account_id: uid,
     identification_hash:
       account.identification_hash ||
       fallbackSessionAccount?.identification_hash,
@@ -277,8 +287,131 @@ function normalizeAccount({ account, aspsp, fallbackSessionAccount = null }) {
     orgId: aspsp?.name ?? 'Unknown',
     name: accountDisplayName(account),
     balance: 0,
-    uid: account.uid || fallbackSessionAccount?.uid || null,
+    uid,
   };
+}
+
+function getHeaderValue(req, headerName) {
+  const value = req.get(headerName);
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function getPsuHeadersFromRequest(req) {
+  const forwardedFor = getHeaderValue(req, 'x-forwarded-for');
+  const ipAddress =
+    forwardedFor?.split(',')[0]?.trim() || req.ip || req.socket?.remoteAddress;
+  const userAgent = getHeaderValue(req, 'user-agent');
+  const referer = getHeaderValue(req, 'referer');
+  const accept = getHeaderValue(req, 'accept');
+  const acceptCharset = getHeaderValue(req, 'accept-charset');
+  const acceptEncoding = getHeaderValue(req, 'accept-encoding');
+  const acceptLanguage = getHeaderValue(req, 'accept-language');
+
+  const psuHeaders = {
+    ...(ipAddress ? { 'Psu-Ip-Address': ipAddress } : {}),
+    ...(userAgent ? { 'Psu-User-Agent': userAgent } : {}),
+    ...(referer ? { 'Psu-Referer': referer } : {}),
+    ...(accept ? { 'Psu-Accept': accept } : {}),
+    ...(acceptCharset ? { 'Psu-Accept-Charset': acceptCharset } : {}),
+    ...(acceptEncoding ? { 'Psu-Accept-Encoding': acceptEncoding } : {}),
+    ...(acceptLanguage ? { 'Psu-Accept-language': acceptLanguage } : {}),
+  };
+
+  return Object.keys(psuHeaders).length > 0 ? psuHeaders : null;
+}
+
+function getSessionPsuHeaders(sessionId) {
+  if (!sessionId) {
+    return null;
+  }
+
+  const data = sessionPsuHeadersById.get(sessionId);
+  if (!data) {
+    return null;
+  }
+
+  data.updatedAt = Date.now();
+  return data.headers;
+}
+
+function findAspsp(aspsps, expectedAspsp) {
+  const expectedName = String(expectedAspsp?.name ?? '')
+    .trim()
+    .toLowerCase();
+  const expectedCountry = String(expectedAspsp?.country ?? '')
+    .trim()
+    .toUpperCase();
+
+  return aspsps.find(aspsp => {
+    const aspspName = String(aspsp?.name ?? '')
+      .trim()
+      .toLowerCase();
+    const aspspCountry = String(aspsp?.country ?? '')
+      .trim()
+      .toUpperCase();
+    return aspspName === expectedName && aspspCountry === expectedCountry;
+  });
+}
+
+function capValidUntil(validUntil, maximumConsentValidity) {
+  const now = Date.now();
+  const nowSeconds = Math.floor(now / 1000);
+
+  const parsedValidUntilMs = Date.parse(String(validUntil ?? ''));
+  const requestedMs = Number.isFinite(parsedValidUntilMs)
+    ? parsedValidUntilMs
+    : now + DEFAULT_CONSENT_VALIDITY_SECONDS * 1000;
+
+  const maxValiditySeconds = Number.parseInt(
+    String(maximumConsentValidity ?? ''),
+    10,
+  );
+  const maxAllowedMs = Number.isFinite(maxValiditySeconds)
+    ? now + Math.max(maxValiditySeconds, 1) * 1000
+    : now + DEFAULT_CONSENT_VALIDITY_SECONDS * 1000;
+
+  const cappedMs = Math.min(
+    Math.max(requestedMs, nowSeconds * 1000),
+    maxAllowedMs,
+  );
+  return new Date(cappedMs).toISOString();
+}
+
+async function getNormalizedAccess({ aspsp, access, psuType }) {
+  const normalizedAccess = {
+    ...(access ?? {}),
+  };
+
+  let maximumConsentValidity = null;
+
+  if (aspsp?.country && aspsp?.name) {
+    try {
+      const aspspsResponse = await enableBankingRequest({
+        path: '/aspsps',
+        method: 'GET',
+        query: {
+          country: aspsp.country,
+          service: 'AIS',
+          psu_type: psuType,
+        },
+      });
+
+      const matchedAspsp = findAspsp(aspspsResponse?.aspsps ?? [], aspsp);
+      maximumConsentValidity = matchedAspsp?.maximum_consent_validity ?? null;
+    } catch {
+      maximumConsentValidity = null;
+    }
+  }
+
+  normalizedAccess.valid_until = capValidUntil(
+    normalizedAccess.valid_until,
+    maximumConsentValidity,
+  );
+
+  return normalizedAccess;
 }
 
 const ENABLE_BANKING_AUTH_EXPIRED_ERRORS = new Set([
@@ -336,7 +469,8 @@ function mapEnableBankingSyncError(error) {
 
     if (
       ENABLE_BANKING_AUTH_EXPIRED_ERRORS.has(providerErrorCode) ||
-      ENABLE_BANKING_BAD_CREDENTIAL_ERRORS.has(providerErrorCode)
+      ENABLE_BANKING_BAD_CREDENTIAL_ERRORS.has(providerErrorCode) ||
+      providerErrorCode === 'PSU_HEADER_NOT_PROVIDED'
     ) {
       return {
         error_type: 'ITEM_ERROR',
@@ -371,6 +505,7 @@ app.get('/callback', (req, res) => {
     error,
     error_description: errorDescription,
   } = req.query ?? {};
+  const psuHeaders = getPsuHeadersFromRequest(req);
 
   if (typeof state === 'string' && state.length > 0) {
     authResultByState.set(state, {
@@ -378,6 +513,7 @@ app.get('/callback', (req, res) => {
       error: typeof error === 'string' ? error : null,
       errorDescription:
         typeof errorDescription === 'string' ? errorDescription : null,
+      psuHeaders,
       updatedAt: Date.now(),
     });
   }
@@ -444,13 +580,18 @@ app.post(
       language,
       psuId,
     } = req.body || {};
+    const normalizedAccess = await getNormalizedAccess({
+      aspsp,
+      access,
+      psuType,
+    });
 
     const data = await enableBankingRequest({
       path: '/auth',
       method: 'POST',
       body: {
         aspsp,
-        access,
+        access: normalizedAccess,
         redirect_url: redirectUrl,
         state,
         ...(psuType ? { psu_type: psuType } : {}),
@@ -533,6 +674,13 @@ app.post(
       },
     });
 
+    if (session.session_id && callbackResult.psuHeaders) {
+      sessionPsuHeadersById.set(session.session_id, {
+        headers: callbackResult.psuHeaders,
+        updatedAt: Date.now(),
+      });
+    }
+
     if (authorizationId) {
       pendingAuthById.delete(authorizationId);
     }
@@ -543,12 +691,14 @@ app.post(
       data: {
         status: 'authorized',
         ...session,
-        accounts: (session.accounts ?? []).map(account =>
-          normalizeAccount({
-            account,
-            aspsp: session.aspsp,
-          }),
-        ),
+        accounts: (session.accounts ?? [])
+          .map(account =>
+            normalizeAccount({
+              account,
+              aspsp: session.aspsp,
+            }),
+          )
+          .filter(account => Boolean(account.account_id)),
       },
     });
   }),
@@ -558,6 +708,7 @@ app.post(
   '/accounts',
   handleError(async (req, res) => {
     const { sessionId } = req.body || {};
+    const psuHeaders = getSessionPsuHeaders(sessionId);
 
     const session = await enableBankingRequest({
       path: `/sessions/${sessionId}`,
@@ -575,6 +726,7 @@ app.post(
           return await enableBankingRequest({
             path: `/accounts/${accountId}/details`,
             method: 'GET',
+            headers: psuHeaders,
           });
         } catch {
           return null;
@@ -582,15 +734,17 @@ app.post(
       }),
     );
 
-    const accounts = accountIds.map((accountId, index) =>
-      normalizeAccount({
-        account: detailedAccounts[index] ?? { uid: accountId },
-        aspsp: session.aspsp,
-        fallbackSessionAccount: session.accounts_data?.find(
-          account => account.uid === accountId,
-        ),
-      }),
-    );
+    const accounts = accountIds
+      .map((accountId, index) =>
+        normalizeAccount({
+          account: detailedAccounts[index] ?? { uid: accountId },
+          aspsp: session.aspsp,
+          fallbackSessionAccount: session.accounts_data?.find(
+            account => account.uid === accountId,
+          ),
+        }),
+      )
+      .filter(account => Boolean(account.account_id));
 
     res.send({
       status: 'ok',
@@ -605,6 +759,7 @@ app.post(
 app.post('/transactions', async (req, res) => {
   const {
     accountId,
+    sessionId,
     startDate,
     endDate,
     continuationKey,
@@ -614,30 +769,48 @@ app.post('/transactions', async (req, res) => {
   } = req.body || {};
 
   try {
-    const transactionsResponse = await enableBankingRequest({
-      path: `/accounts/${accountId}/transactions`,
-      method: 'GET',
-      query: {
-        date_from: startDate,
-        date_to: endDate,
-        continuation_key: continuationKey,
-        transaction_status: transactionStatus,
-        strategy,
-      },
-    });
+    const psuHeaders = getSessionPsuHeaders(sessionId);
+    const shouldAutopaginate = !continuationKey;
+    let nextContinuationKey = continuationKey || null;
+    let responseContinuationKey = null;
+    const transactions = [];
+    let remainingPages = shouldAutopaginate ? AUTO_PAGINATION_MAX_PAGES : 1;
+
+    while (remainingPages > 0) {
+      const transactionsResponse = await enableBankingRequest({
+        path: `/accounts/${accountId}/transactions`,
+        method: 'GET',
+        query: {
+          date_from: startDate,
+          date_to: endDate,
+          continuation_key: nextContinuationKey,
+          transaction_status: transactionStatus,
+          strategy,
+        },
+        headers: psuHeaders,
+      });
+
+      transactions.push(...(transactionsResponse.transactions ?? []));
+      responseContinuationKey = transactionsResponse.continuation_key ?? null;
+      remainingPages -= 1;
+
+      if (!shouldAutopaginate || !responseContinuationKey) {
+        break;
+      }
+      nextContinuationKey = responseContinuationKey;
+    }
 
     let normalizedBalances = [];
     if (includeBalance) {
       const balancesResponse = await enableBankingRequest({
         path: `/accounts/${accountId}/balances`,
         method: 'GET',
+        headers: psuHeaders,
       });
       normalizedBalances = normalizeBalances(balancesResponse.balances);
     }
 
-    const normalizedTransactions = normalizeTransactions(
-      transactionsResponse.transactions,
-    );
+    const normalizedTransactions = normalizeTransactions(transactions);
 
     res.send({
       status: 'ok',
@@ -645,7 +818,7 @@ app.post('/transactions', async (req, res) => {
         balances: normalizedBalances,
         startingBalance: getStartingBalance(normalizedBalances),
         transactions: normalizedTransactions,
-        continuation_key: transactionsResponse.continuation_key ?? null,
+        continuation_key: responseContinuationKey ?? null,
       },
     });
   } catch (error) {
@@ -660,10 +833,12 @@ app.post(
   '/remove-account',
   handleError(async (req, res) => {
     const { sessionId } = req.body || {};
+    const psuHeaders = getSessionPsuHeaders(sessionId);
 
     const data = await enableBankingRequest({
       path: `/sessions/${sessionId}`,
       method: 'DELETE',
+      headers: psuHeaders,
     });
 
     res.send({
