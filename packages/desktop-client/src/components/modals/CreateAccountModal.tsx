@@ -64,6 +64,16 @@ export function CreateAccountModal({
   const { hasPermission } = useAuth();
   const multiuserEnabled = useMultiuserEnabled();
 
+  const providersJoiner = ` ${t('or')} `;
+  const providersNeedingSetup = [
+    isGoCardlessSetupComplete ? '' : 'GoCardless',
+    isEnableBankingSetupComplete ? '' : 'Enable Banking',
+    isSimpleFinSetupComplete ? '' : 'SimpleFIN',
+    isPluggyAiSetupComplete ? '' : 'Pluggy.ai',
+  ]
+    .filter(Boolean)
+    .join(providersJoiner);
+
   const onConnectGoCardless = () => {
     if (!isGoCardlessSetupComplete) {
       onGoCardlessInit();
@@ -700,19 +710,10 @@ export function CreateAccountModal({
                     !isPluggyAiSetupComplete) &&
                     !canSetSecrets && (
                       <Warning>
-                        <Trans>
-                          You don&apos;t have the required permissions to set up
-                          secrets. Please contact an Admin to configure
-                        </Trans>{' '}
-                        {[
-                          isGoCardlessSetupComplete ? '' : 'GoCardless',
-                          isEnableBankingSetupComplete ? '' : 'Enable Banking',
-                          isSimpleFinSetupComplete ? '' : 'SimpleFIN',
-                          isPluggyAiSetupComplete ? '' : 'Pluggy.ai',
-                        ]
-                          .filter(Boolean)
-                          .join(' or ')}
-                        .
+                        {t(
+                          "You don't have the required permissions to set up secrets. Please contact an Admin to configure {{providers}}.",
+                          { providers: providersNeedingSetup },
+                        )}
                       </Warning>
                     )}
                 </>
