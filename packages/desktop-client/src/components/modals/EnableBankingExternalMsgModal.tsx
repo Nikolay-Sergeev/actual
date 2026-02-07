@@ -37,12 +37,8 @@ function isEnableBankingAspsp(value: unknown): value is EnableBankingAspsp {
   }
 
   // Minimal shape check; server is the source of truth.
-  return (
-    'name' in value &&
-    typeof (value as { name?: unknown }).name === 'string' &&
-    'country' in value &&
-    typeof (value as { country?: unknown }).country === 'string'
-  );
+  const obj = value as Record<string, unknown>;
+  return typeof obj.name === 'string' && typeof obj.country === 'string';
 }
 
 function useAvailableAspsps(country?: string) {

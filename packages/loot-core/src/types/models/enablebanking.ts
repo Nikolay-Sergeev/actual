@@ -9,6 +9,25 @@ export type EnableBankingAuthResult = {
   accounts: SyncServerEnableBankingAccount[];
 };
 
+// Raw response from the sync-server `/enablebanking/create-auth` endpoint.
+export type EnableBankingCreateAuthResponse = {
+  url?: string;
+  authorization_id?: string;
+  reason?: string;
+  error_description?: string;
+  error?: string;
+  error_code?: string;
+};
+
+export type EnableBankingCreateAuthResult =
+  | EnableBankingCreateAuthResponse
+  | { error: 'unauthorized' | 'failed' };
+
+export type EnableBankingAuthPollResult =
+  | { error: 'timeout' }
+  | { error: 'unknown'; message?: string }
+  | { data: EnableBankingAuthResult };
+
 export type SyncServerEnableBankingAccount = {
   balance: number;
   account_id: string;

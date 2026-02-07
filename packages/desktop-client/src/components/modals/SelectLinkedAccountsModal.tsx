@@ -110,47 +110,59 @@ export type SelectLinkedAccountsModalProps =
       syncSource: 'enableBanking';
     };
 
-export function SelectLinkedAccountsModal({
-  requisitionId = undefined,
-  sessionId = undefined,
-  externalAccounts,
-  syncSource,
-}: SelectLinkedAccountsModalProps) {
+type ExternalAccount =
+  | SyncServerGoCardlessAccount
+  | SyncServerSimpleFinAccount
+  | SyncServerPluggyAiAccount
+  | SyncServerEnableBankingAccount;
+
+function sortExternalAccounts<T extends ExternalAccount>(accounts: T[]): T[] {
+  const toSort = [...accounts];
+  toSort.sort(
+    (a, b) =>
+      getInstitutionName(a).localeCompare(getInstitutionName(b)) ||
+      a.name.localeCompare(b.name),
+  );
+  return toSort;
+}
+
+export function SelectLinkedAccountsModal(
+  props: SelectLinkedAccountsModalProps,
+) {
   const propsWithSortedExternalAccounts =
     useMemo<SelectLinkedAccountsModalProps>(() => {
-      const toSort = externalAccounts ? [...externalAccounts] : [];
-      toSort.sort(
-        (a, b) =>
-          getInstitutionName(a)?.localeCompare(getInstitutionName(b)) ||
-          a.name.localeCompare(b.name),
-      );
-      switch (syncSource) {
+      switch (props.syncSource) {
         case 'simpleFin':
           return {
             syncSource: 'simpleFin',
-            externalAccounts: toSort as SyncServerSimpleFinAccount[],
+            externalAccounts: sortExternalAccounts(props.externalAccounts),
           };
         case 'pluggyai':
           return {
             syncSource: 'pluggyai',
-            externalAccounts: toSort as SyncServerPluggyAiAccount[],
+            externalAccounts: sortExternalAccounts(props.externalAccounts),
           };
         case 'goCardless':
           return {
             syncSource: 'goCardless',
-            requisitionId: requisitionId!,
-            externalAccounts: toSort as SyncServerGoCardlessAccount[],
+            requisitionId: props.requisitionId,
+            externalAccounts: sortExternalAccounts(props.externalAccounts),
           };
         case 'enableBanking':
           return {
             syncSource: 'enableBanking',
-            sessionId: sessionId!,
-            externalAccounts: toSort as SyncServerEnableBankingAccount[],
+            sessionId: props.sessionId,
+            externalAccounts: sortExternalAccounts(props.externalAccounts),
           };
         default:
-          throw new Error(`Unrecognized sync source: ${syncSource}`);
+          throw new Error('Unrecognized sync source');
       }
-    }, [externalAccounts, syncSource, requisitionId, sessionId]);
+    }, [
+      props.externalAccounts,
+      props.requisitionId,
+      props.sessionId,
+      props.syncSource,
+    ]);
 
   const { t } = useTranslation();
   const { isNarrowWidth } = useResponsive();
@@ -516,12 +528,6 @@ export function SelectLinkedAccountsModal({
     </Modal>
   );
 }
-
-type ExternalAccount =
-  | SyncServerGoCardlessAccount
-  | SyncServerSimpleFinAccount
-  | SyncServerPluggyAiAccount
-  | SyncServerEnableBankingAccount;
 
 type StartingBalanceInfo = {
   date: string;

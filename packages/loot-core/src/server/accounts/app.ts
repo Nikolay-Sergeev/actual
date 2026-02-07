@@ -13,7 +13,9 @@ import {
   type AccountEntity,
   type CategoryEntity,
   type EnableBankingAspsp,
+  type EnableBankingAuthPollResult,
   type EnableBankingAuthResult,
+  type EnableBankingCreateAuthResult,
   type GoCardlessToken,
   type ImportTransactionEntity,
   type SyncServerEnableBankingAccount,
@@ -725,7 +727,7 @@ async function pollEnableBankingAuth({
   authorizationId,
 }: {
   authorizationId: string;
-}) {
+}): Promise<EnableBankingAuthPollResult> {
   const userToken = await asyncStorage.getItem('user-token');
   if (!userToken) return { error: 'unknown' };
 
@@ -785,7 +787,7 @@ async function pollEnableBankingAuth({
     });
   }
 
-  return new Promise(resolve => {
+  return new Promise<EnableBankingAuthPollResult>(resolve => {
     getData(data => {
       if (data.status === 'success') {
         resolve({ data: data.data });
@@ -1066,7 +1068,7 @@ async function createEnableBankingAuth({
 }: {
   aspsp: EnableBankingAspsp;
   accessValidForDays?: number;
-}) {
+}): Promise<EnableBankingCreateAuthResult> {
   const userToken = await asyncStorage.getItem('user-token');
 
   if (!userToken) {
