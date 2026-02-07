@@ -110,6 +110,65 @@ describe('app-enablebanking', () => {
     expect(secondPoll.body.data.status).toBe('pending');
   });
 
+  it('authorizes on poll-auth by authorizationId when state is not provided', async () => {
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          aspsps: [
+            {
+              name: 'Test Bank',
+              country: 'LT',
+              maximum_consent_validity: 86400,
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          url: 'https://enablebanking.com/auth',
+          authorization_id: 'auth-xyz',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          session_id: 'session-xyz',
+          aspsp: { name: 'Test Bank', country: 'LT' },
+          accounts: [
+            { uid: 'acc-1', identification_hash: 'hash-1', name: 'A' },
+          ],
+        }),
+      });
+
+    const createRes = await authenticatedPost('/create-auth', {
+      aspsp: { name: 'Test Bank', country: 'LT' },
+      access: {
+        balances: true,
+        transactions: true,
+        valid_until: '2026-02-01T00:00:00.000Z',
+      },
+      redirectUrl: 'https://example.com/callback',
+      state: 'state-xyz',
+      psuType: 'personal',
+    });
+
+    expect(createRes.statusCode).toBe(200);
+    expect(createRes.body.data.authorization_id).toBe('auth-xyz');
+
+    await request(app).get('/callback?state=state-xyz&code=auth-code-xyz');
+
+    const pollRes = await authenticatedPost('/poll-auth', {
+      authorizationId: 'auth-xyz',
+    });
+
+    expect(pollRes.statusCode).toBe(200);
+    expect(pollRes.body.status).toBe('ok');
+    expect(pollRes.body.data.status).toBe('authorized');
+    expect(pollRes.body.data.session_id).toBe('session-xyz');
+  });
+
   it('caps valid_until in create-auth by ASPSP maximum consent validity', async () => {
     vi.useFakeTimers();
     try {
@@ -160,6 +219,74 @@ describe('app-enablebanking', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('does not hard-cap valid_until to default when ASPSP metadata lookup fails', async () => {
+    global.fetch
+      .mockRejectedValueOnce(new Error('ASPSP lookup failed'))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          url: 'https://enablebanking.com/auth',
+          authorization_id: 'auth-no-cap',
+        }),
+      });
+
+    const requestedValidUntil = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    const res = await authenticatedPost('/create-auth', {
+      aspsp: { name: 'Test Bank', country: 'LT' },
+      access: {
+        balances: true,
+        transactions: true,
+        valid_until: requestedValidUntil,
+      },
+      redirectUrl: 'https://example.com/callback',
+      state: 'state-no-cap',
+      psuType: 'personal',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+
+    const [, authOptions] = global.fetch.mock.calls[1];
+    const authBody = JSON.parse(authOptions.body);
+    expect(authBody.access.valid_until).toBe(requestedValidUntil);
+  });
+
+  it('uses accounts_data fallback when session accounts list is empty', async () => {
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          session_id: 'session-accounts',
+          aspsp: { name: 'Test Bank', country: 'LT' },
+          accounts: [],
+          accounts_data: [{ uid: 'acc-fallback', identification_hash: 'h-1' }],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          uid: 'acc-fallback',
+          name: 'Fallback Account',
+          identification_hash: 'h-1',
+        }),
+      });
+
+    const res = await authenticatedPost('/accounts', {
+      sessionId: 'session-accounts',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.status).toBe('ok');
+    expect(res.body.data.accounts).toHaveLength(1);
+    expect(res.body.data.accounts[0]).toMatchObject({
+      account_id: 'acc-fallback',
+      name: 'Fallback Account',
+      identification_hash: 'h-1',
+    });
   });
 
   it('autopaginates transactions when continuation key is not provided', async () => {

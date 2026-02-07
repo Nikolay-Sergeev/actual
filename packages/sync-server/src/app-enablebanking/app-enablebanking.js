@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import express from 'express';
 import jws from 'jws';
 
+import { getAccountDb } from '../account-db';
 import { handleError } from '../app-gocardless/util/handle-error';
 import { SecretName, secretsService } from '../services/secrets-service';
 import {
@@ -25,10 +26,9 @@ const SESSION_PSU_HEADERS_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_CONSENT_VALIDITY_SECONDS = 24 * 60 * 60;
 const AUTO_PAGINATION_MAX_PAGES = 20;
 const ENABLE_BANKING_ENVIRONMENTS = new Set(['SANDBOX', 'PRODUCTION']);
-
-const pendingAuthById = new Map();
-const authResultByState = new Map();
-const sessionPsuHeadersById = new Map();
+const TEMP_PENDING_AUTH_PREFIX = 'enablebanking_tmp_pending_auth:';
+const TEMP_AUTH_RESULT_PREFIX = 'enablebanking_tmp_auth_result:';
+const TEMP_SESSION_PSU_HEADERS_PREFIX = 'enablebanking_tmp_session_psu:';
 
 class EnableBankingApiError extends Error {
   constructor(message, status, details) {
@@ -105,26 +105,76 @@ function createEnableBankingJwt() {
   });
 }
 
-function cleanupAuthCache() {
+function getTemporaryEntry(prefix, key) {
+  if (!key) {
+    return null;
+  }
+
+  const row = getAccountDb().first('SELECT value FROM secrets WHERE name = ?', [
+    `${prefix}${key}`,
+  ]);
+
+  if (!row?.value) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(row.value);
+  } catch {
+    return null;
+  }
+}
+
+function setTemporaryEntry(prefix, key, value) {
+  if (!key) {
+    return;
+  }
+
+  getAccountDb().mutate(
+    'INSERT OR REPLACE INTO secrets (name, value) VALUES (?, ?)',
+    [`${prefix}${key}`, JSON.stringify(value)],
+  );
+}
+
+function deleteTemporaryEntry(prefix, key) {
+  if (!key) {
+    return;
+  }
+
+  getAccountDb().mutate('DELETE FROM secrets WHERE name = ?', [
+    `${prefix}${key}`,
+  ]);
+}
+
+function cleanupTemporaryEntries(prefix, ttlMs) {
   const now = Date.now();
+  const rows = getAccountDb().all(
+    'SELECT name, value FROM secrets WHERE name LIKE ?',
+    [`${prefix}%`],
+  );
 
-  for (const [key, value] of pendingAuthById.entries()) {
-    if (value.createdAt + AUTH_STATE_TTL_MS < now) {
-      pendingAuthById.delete(key);
+  for (const row of rows) {
+    let updatedAt = null;
+    try {
+      const parsed = JSON.parse(row.value);
+      updatedAt = Number(parsed?.updatedAt ?? parsed?.createdAt ?? null);
+    } catch {
+      updatedAt = null;
+    }
+
+    if (!Number.isFinite(updatedAt) || updatedAt + ttlMs < now) {
+      getAccountDb().mutate('DELETE FROM secrets WHERE name = ?', [row.name]);
     }
   }
+}
 
-  for (const [key, value] of authResultByState.entries()) {
-    if (value.updatedAt + AUTH_STATE_TTL_MS < now) {
-      authResultByState.delete(key);
-    }
-  }
-
-  for (const [key, value] of sessionPsuHeadersById.entries()) {
-    if (value.updatedAt + SESSION_PSU_HEADERS_TTL_MS < now) {
-      sessionPsuHeadersById.delete(key);
-    }
-  }
+function cleanupAuthCache() {
+  cleanupTemporaryEntries(TEMP_PENDING_AUTH_PREFIX, AUTH_STATE_TTL_MS);
+  cleanupTemporaryEntries(TEMP_AUTH_RESULT_PREFIX, AUTH_STATE_TTL_MS);
+  cleanupTemporaryEntries(
+    TEMP_SESSION_PSU_HEADERS_PREFIX,
+    SESSION_PSU_HEADERS_TTL_MS,
+  );
 }
 
 function getQueryString(query) {
@@ -328,12 +378,15 @@ function getSessionPsuHeaders(sessionId) {
     return null;
   }
 
-  const data = sessionPsuHeadersById.get(sessionId);
+  const data = getTemporaryEntry(TEMP_SESSION_PSU_HEADERS_PREFIX, sessionId);
   if (!data) {
     return null;
   }
 
-  data.updatedAt = Date.now();
+  setTemporaryEntry(TEMP_SESSION_PSU_HEADERS_PREFIX, sessionId, {
+    ...data,
+    updatedAt: Date.now(),
+  });
   return data.headers;
 }
 
@@ -369,14 +422,14 @@ function capValidUntil(validUntil, maximumConsentValidity) {
     String(maximumConsentValidity ?? ''),
     10,
   );
-  const maxAllowedMs = Number.isFinite(maxValiditySeconds)
-    ? now + Math.max(maxValiditySeconds, 1) * 1000
-    : now + DEFAULT_CONSENT_VALIDITY_SECONDS * 1000;
+  const hasValidityLimit =
+    Number.isFinite(maxValiditySeconds) && maxValiditySeconds > 0;
 
-  const cappedMs = Math.min(
-    Math.max(requestedMs, nowSeconds * 1000),
-    maxAllowedMs,
-  );
+  let cappedMs = Math.max(requestedMs, nowSeconds * 1000);
+  if (hasValidityLimit) {
+    const maxAllowedMs = now + maxValiditySeconds * 1000;
+    cappedMs = Math.min(cappedMs, maxAllowedMs);
+  }
   return new Date(cappedMs).toISOString();
 }
 
@@ -508,7 +561,7 @@ app.get('/callback', (req, res) => {
   const psuHeaders = getPsuHeadersFromRequest(req);
 
   if (typeof state === 'string' && state.length > 0) {
-    authResultByState.set(state, {
+    setTemporaryEntry(TEMP_AUTH_RESULT_PREFIX, state, {
       code: typeof code === 'string' ? code : null,
       error: typeof error === 'string' ? error : null,
       errorDescription:
@@ -606,9 +659,10 @@ app.post(
     });
 
     if (data.authorization_id) {
-      pendingAuthById.set(data.authorization_id, {
+      setTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, data.authorization_id, {
         state,
         createdAt: Date.now(),
+        updatedAt: Date.now(),
       });
     }
 
@@ -628,7 +682,9 @@ app.post(
     cleanupAuthCache();
 
     const { authorizationId, state } = req.body || {};
-    const pending = authorizationId ? pendingAuthById.get(authorizationId) : {};
+    const pending = authorizationId
+      ? getTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, authorizationId)
+      : null;
     const authState = state || pending?.state;
 
     if (!authState) {
@@ -643,7 +699,10 @@ app.post(
       return;
     }
 
-    const callbackResult = authResultByState.get(authState);
+    const callbackResult = getTemporaryEntry(
+      TEMP_AUTH_RESULT_PREFIX,
+      authState,
+    );
     if (!callbackResult) {
       res.send({
         status: 'ok',
@@ -675,16 +734,16 @@ app.post(
     });
 
     if (session.session_id && callbackResult.psuHeaders) {
-      sessionPsuHeadersById.set(session.session_id, {
+      setTemporaryEntry(TEMP_SESSION_PSU_HEADERS_PREFIX, session.session_id, {
         headers: callbackResult.psuHeaders,
         updatedAt: Date.now(),
       });
     }
 
     if (authorizationId) {
-      pendingAuthById.delete(authorizationId);
+      deleteTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, authorizationId);
     }
-    authResultByState.delete(authState);
+    deleteTemporaryEntry(TEMP_AUTH_RESULT_PREFIX, authState);
 
     res.send({
       status: 'ok',
@@ -716,9 +775,10 @@ app.post(
     });
 
     const accountIds =
-      session.accounts ??
-      session.accounts_data?.map(account => account.uid).filter(Boolean) ??
-      [];
+      Array.isArray(session.accounts) && session.accounts.length > 0
+        ? session.accounts
+        : (session.accounts_data?.map(account => account.uid).filter(Boolean) ??
+          []);
 
     const detailedAccounts = await Promise.all(
       accountIds.map(async accountId => {
