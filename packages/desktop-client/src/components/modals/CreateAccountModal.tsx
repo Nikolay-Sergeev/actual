@@ -149,18 +149,7 @@ export function CreateAccountModal({
 
   const onConnectEnableBanking = async () => {
     if (!isEnableBankingSetupComplete) {
-      dispatch(
-        addNotification({
-          notification: {
-            type: 'error',
-            title: t('Enable Banking is not configured'),
-            message: t(
-              'Set `enablebanking_applicationId`, `enablebanking_privateKey`, and `enablebanking_environment` secrets first.',
-            ),
-            timeout: 7000,
-          },
-        }),
-      );
+      onEnableBankingInit();
       return;
     }
 
@@ -222,14 +211,16 @@ export function CreateAccountModal({
       );
     } catch (err) {
       console.error(err);
-      addNotification({
-        notification: {
-          type: 'error',
-          title: t('Error when trying to contact Pluggy.ai'),
-          message: (err as Error).message,
-          timeout: 5000,
-        },
-      });
+      dispatch(
+        addNotification({
+          notification: {
+            type: 'error',
+            title: t('Error when trying to contact Pluggy.ai'),
+            message: (err as Error).message,
+            timeout: 5000,
+          },
+        }),
+      );
       dispatch(
         pushModal({
           modal: {
@@ -276,6 +267,19 @@ export function CreateAccountModal({
           name: 'pluggyai-init',
           options: {
             onSuccess: () => setIsPluggyAiSetupComplete(true),
+          },
+        },
+      }),
+    );
+  };
+
+  const onEnableBankingInit = () => {
+    dispatch(
+      pushModal({
+        modal: {
+          name: 'enablebanking-init',
+          options: {
+            onSuccess: () => setIsEnableBankingSetupComplete(true),
           },
         },
       }),

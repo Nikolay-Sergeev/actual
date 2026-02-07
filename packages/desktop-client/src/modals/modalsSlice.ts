@@ -112,6 +112,12 @@ export type Modal =
       };
     }
   | {
+      name: 'enablebanking-init';
+      options: {
+        onSuccess: () => void;
+      };
+    }
+  | {
       name: 'gocardless-external-msg';
       options: {
         onMoveExternal: (arg: {
