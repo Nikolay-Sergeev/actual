@@ -564,12 +564,10 @@ export function CreateAccountModal({
                       </View>
                       <Text style={{ lineHeight: '1.4em', fontSize: 15 }}>
                         <Trans>
-                          <strong>
-                            Link your account
-                          </strong>{' '}
-                          to access real-time <em>Open Banking</em> data from a
-                          wide network of European banks and automatically
-                          download transactions.
+                          <strong>Link your account</strong> to access real-time{' '}
+                          <em>Open Banking</em> data from a wide network of
+                          European banks and automatically download
+                          transactions.
                         </Trans>
                       </Text>
                       <View

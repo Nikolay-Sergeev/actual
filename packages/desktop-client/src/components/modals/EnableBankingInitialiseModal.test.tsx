@@ -26,10 +26,7 @@ describe('EnableBankingInitialiseModal', () => {
     });
 
     const user = userEvent.setup();
-    await user.type(
-      screen.getByLabelText(/App ID/i),
-      'test-application-id',
-    );
+    await user.type(screen.getByLabelText(/App ID/i), 'test-application-id');
     await user.type(
       screen.getByLabelText(/Private key \(PEM\)/i),
       '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
@@ -89,7 +86,9 @@ describe('EnableBankingInitialiseModal', () => {
     expect(
       screen.getByRole('button', { name: /PRODUCTION/i }),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /SANDBOX/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: /SANDBOX/i }),
+    ).toBeInTheDocument();
     expect(onSuccess).not.toHaveBeenCalled();
   });
 });
