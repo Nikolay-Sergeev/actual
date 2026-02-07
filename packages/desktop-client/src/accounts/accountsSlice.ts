@@ -7,6 +7,7 @@ import { groupById } from 'loot-core/shared/util';
 import {
   type AccountEntity,
   type CategoryEntity,
+  type SyncServerEnableBankingAccount,
   type SyncServerGoCardlessAccount,
   type SyncServerPluggyAiAccount,
   type SyncServerSimpleFinAccount,
@@ -340,6 +341,37 @@ export const linkAccountPluggyAi = createAppAsyncThunk(
   },
 );
 
+type LinkAccountEnableBankingPayload = LinkAccountBasePayload & {
+  sessionId: string;
+  externalAccount: SyncServerEnableBankingAccount;
+};
+
+export const linkAccountEnableBanking = createAppAsyncThunk(
+  `${sliceName}/linkAccountEnableBanking`,
+  async (
+    {
+      sessionId,
+      externalAccount,
+      upgradingId,
+      offBudget,
+      startingDate,
+      startingBalance,
+    }: LinkAccountEnableBankingPayload,
+    { dispatch },
+  ) => {
+    await send('enablebanking-accounts-link', {
+      sessionId,
+      externalAccount,
+      upgradingId,
+      offBudget,
+      startingDate,
+      startingBalance,
+    });
+    dispatch(markPayeesDirty());
+    dispatch(markAccountsDirty());
+  },
+);
+
 function handleSyncResponse(
   accountId: AccountEntity['id'],
   res: SyncResponseWithErrors,
@@ -654,6 +686,7 @@ export const actions = {
   linkAccount,
   linkAccountSimpleFin,
   linkAccountPluggyAi,
+  linkAccountEnableBanking,
   moveAccount,
   unlinkAccount,
   syncAccounts,

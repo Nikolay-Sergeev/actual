@@ -12,8 +12,13 @@ import { amountToInteger } from '../../shared/util';
 import {
   type AccountEntity,
   type CategoryEntity,
+  type EnableBankingAspsp,
+  type EnableBankingAuthPollResult,
+  type EnableBankingAuthResult,
+  type EnableBankingCreateAuthResult,
   type GoCardlessToken,
   type ImportTransactionEntity,
+  type SyncServerEnableBankingAccount,
   type SyncServerGoCardlessAccount,
   type SyncServerPluggyAiAccount,
   type SyncServerSimpleFinAccount,
@@ -54,6 +59,7 @@ export type AccountHandlers = {
   'gocardless-accounts-link': typeof linkGoCardlessAccount;
   'simplefin-accounts-link': typeof linkSimpleFinAccount;
   'pluggyai-accounts-link': typeof linkPluggyAiAccount;
+  'enablebanking-accounts-link': typeof linkEnableBankingAccount;
   'account-create': typeof createAccount;
   'account-close': typeof closeAccount;
   'account-reopen': typeof reopenAccount;
@@ -65,10 +71,16 @@ export type AccountHandlers = {
   'gocardless-status': typeof goCardlessStatus;
   'simplefin-status': typeof simpleFinStatus;
   'pluggyai-status': typeof pluggyAiStatus;
+  'enablebanking-status': typeof enableBankingStatus;
   'simplefin-accounts': typeof simpleFinAccounts;
   'pluggyai-accounts': typeof pluggyAiAccounts;
+  'enablebanking-accounts': typeof enableBankingAccounts;
+  'enablebanking-get-aspsps': typeof getEnableBankingAspsps;
   'gocardless-get-banks': typeof getGoCardlessBanks;
   'gocardless-create-web-token': typeof createGoCardlessWebToken;
+  'enablebanking-create-auth': typeof createEnableBankingAuth;
+  'enablebanking-poll-auth': typeof pollEnableBankingAuth;
+  'enablebanking-poll-auth-stop': typeof stopEnableBankingAuthPolling;
   'accounts-bank-sync': typeof accountsBankSync;
   'simplefin-batch-sync': typeof simpleFinBatchSync;
   'transactions-import': typeof importTransactions;
@@ -334,6 +346,77 @@ async function linkPluggyAiAccount({
   return 'ok';
 }
 
+async function linkEnableBankingAccount({
+  sessionId,
+  externalAccount,
+  upgradingId,
+  offBudget = false,
+  startingDate,
+  startingBalance,
+}: LinkAccountBaseParams & {
+  sessionId: string;
+  externalAccount: SyncServerEnableBankingAccount;
+}) {
+  let id;
+
+  const institution = {
+    name: externalAccount.institution ?? t('Unknown'),
+  };
+
+  const bank = await link.findOrCreateBank(institution, sessionId);
+
+  if (upgradingId) {
+    const accRow = await db.first<db.DbAccount>(
+      'SELECT * FROM accounts WHERE id = ?',
+      [upgradingId],
+    );
+
+    if (!accRow) {
+      throw new Error(`Account with ID ${upgradingId} not found.`);
+    }
+
+    id = accRow.id;
+    await db.update('accounts', {
+      id,
+      account_id: externalAccount.account_id,
+      bank: bank.id,
+      account_sync_source: 'enableBanking',
+    });
+  } else {
+    id = uuidv4();
+    await db.insertWithUUID('accounts', {
+      id,
+      account_id: externalAccount.account_id,
+      name: externalAccount.name,
+      official_name: externalAccount.name,
+      bank: bank.id,
+      offbudget: offBudget ? 1 : 0,
+      account_sync_source: 'enableBanking',
+    });
+    await db.insertPayee({
+      name: '',
+      transfer_acct: id,
+    });
+  }
+
+  await bankSync.syncAccount(
+    undefined,
+    undefined,
+    id,
+    externalAccount.account_id,
+    bank.bank_id,
+    startingDate,
+    startingBalance,
+  );
+
+  await connection.send('sync-event', {
+    type: 'success',
+    tables: ['transactions'],
+  });
+
+  return 'ok';
+}
+
 async function createAccount({
   name,
   balance = 0,
@@ -558,6 +641,9 @@ async function checkSecret(name: string) {
 }
 
 let stopPolling = false;
+// Used to cancel in-flight polling when the modal is closed or the user retries.
+// Each new poll increments the generation; previous poll loops stop when stale.
+let enableBankingPollGeneration = 0;
 
 async function pollGoCardlessWebToken({
   requisitionId,
@@ -639,6 +725,104 @@ async function stopGoCardlessWebTokenPolling() {
   return 'ok';
 }
 
+async function pollEnableBankingAuth({
+  authorizationId,
+}: {
+  authorizationId: string;
+}): Promise<EnableBankingAuthPollResult> {
+  const userToken = await asyncStorage.getItem('user-token');
+  if (!userToken) return { error: 'unknown' };
+
+  const startTime = Date.now();
+  const pollGeneration = ++enableBankingPollGeneration;
+
+  async function getData(
+    cb: (
+      data:
+        | { status: 'timeout' }
+        | { status: 'pending' }
+        | { status: 'error'; message?: string }
+        | { status: 'success'; data: EnableBankingAuthResult },
+    ) => void,
+  ) {
+    if (pollGeneration !== enableBankingPollGeneration) {
+      return;
+    }
+
+    const serverConfig = getServer();
+    if (!serverConfig) {
+      throw new Error('Failed to get server config.');
+    }
+
+    const data = await post(
+      serverConfig.ENABLEBANKING_SERVER + '/poll-auth',
+      { authorizationId },
+      {
+        'X-ACTUAL-TOKEN': userToken,
+      },
+    );
+
+    if (!data || data.status === 'pending') {
+      // Check timeout *after* we've attempted a request. In Firefox, the worker
+      // can be suspended while the user is in the bank consent tab; when it
+      // resumes we want to perform a final check instead of timing out early.
+      if (Date.now() - startTime >= 1000 * 60 * 10) {
+        cb({ status: 'timeout' });
+        return;
+      }
+      setTimeout(() => getData(cb), 3000);
+      return;
+    }
+
+    if (data.status === 'authorized') {
+      cb({
+        status: 'success',
+        data: {
+          session_id: data.session_id,
+          accounts: data.accounts,
+        },
+      });
+      return;
+    }
+
+    cb({
+      status: 'error',
+      message: data.error_description || data.error || 'authorization_failed',
+    });
+  }
+
+  return new Promise<EnableBankingAuthPollResult>(resolve => {
+    getData(data => {
+      if (data.status === 'success') {
+        resolve({ data: data.data });
+        return;
+      }
+
+      if (data.status === 'timeout') {
+        resolve({ error: data.status });
+        return;
+      }
+
+      if (data.status === 'error') {
+        resolve({
+          error: 'unknown',
+          message: data.message,
+        });
+        return;
+      }
+
+      resolve({
+        error: 'unknown',
+      });
+    });
+  });
+}
+
+async function stopEnableBankingAuthPolling() {
+  enableBankingPollGeneration += 1;
+  return 'ok';
+}
+
 async function goCardlessStatus() {
   const userToken = await asyncStorage.getItem('user-token');
 
@@ -702,6 +886,27 @@ async function pluggyAiStatus() {
   );
 }
 
+async function enableBankingStatus() {
+  const userToken = await asyncStorage.getItem('user-token');
+
+  if (!userToken) {
+    return { error: 'unauthorized' };
+  }
+
+  const serverConfig = getServer();
+  if (!serverConfig) {
+    throw new Error('Failed to get server config.');
+  }
+
+  return post(
+    serverConfig.ENABLEBANKING_SERVER + '/status',
+    {},
+    {
+      'X-ACTUAL-TOKEN': userToken,
+    },
+  );
+}
+
 async function simpleFinAccounts() {
   const userToken = await asyncStorage.getItem('user-token');
 
@@ -754,6 +959,57 @@ async function pluggyAiAccounts() {
   }
 }
 
+async function enableBankingAccounts({ sessionId }: { sessionId: string }) {
+  const userToken = await asyncStorage.getItem('user-token');
+
+  if (!userToken) {
+    return { error: 'unauthorized' };
+  }
+
+  const serverConfig = getServer();
+  if (!serverConfig) {
+    throw new Error('Failed to get server config.');
+  }
+
+  try {
+    return await post(
+      serverConfig.ENABLEBANKING_SERVER + '/accounts',
+      { sessionId },
+      {
+        'X-ACTUAL-TOKEN': userToken,
+      },
+      60000,
+    );
+  } catch {
+    return { error_code: 'TIMED_OUT' };
+  }
+}
+
+async function getEnableBankingAspsps({
+  country,
+}: {
+  country?: string;
+} = {}) {
+  const userToken = await asyncStorage.getItem('user-token');
+
+  if (!userToken) {
+    return { error: 'unauthorized' };
+  }
+
+  const serverConfig = getServer();
+  if (!serverConfig) {
+    throw new Error('Failed to get server config.');
+  }
+
+  return post(
+    serverConfig.ENABLEBANKING_SERVER + '/aspsps',
+    { country, service: 'AIS', psuType: 'personal' },
+    {
+      'X-ACTUAL-TOKEN': userToken,
+    },
+  );
+}
+
 async function getGoCardlessBanks(country: string) {
   const userToken = await asyncStorage.getItem('user-token');
 
@@ -799,6 +1055,53 @@ async function createGoCardlessWebToken({
       {
         institutionId,
         accessValidForDays,
+      },
+      {
+        'X-ACTUAL-TOKEN': userToken,
+      },
+    );
+  } catch (error) {
+    logger.error(error);
+    return { error: 'failed' };
+  }
+}
+
+async function createEnableBankingAuth({
+  aspsp,
+  accessValidForDays = 1,
+}: {
+  aspsp: EnableBankingAspsp;
+  accessValidForDays?: number;
+}): Promise<EnableBankingCreateAuthResult> {
+  const userToken = await asyncStorage.getItem('user-token');
+
+  if (!userToken) {
+    return { error: 'unauthorized' };
+  }
+
+  const serverConfig = getServer();
+  if (!serverConfig) {
+    throw new Error('Failed to get server config.');
+  }
+
+  // Keep consent bounded while honoring caller-provided duration.
+  const consentDays = Math.max(1, Math.min(accessValidForDays, 90));
+  const validUntil = new Date(
+    Date.now() + consentDays * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  try {
+    return await post(
+      serverConfig.ENABLEBANKING_SERVER + '/create-auth',
+      {
+        aspsp,
+        psuType: 'personal',
+        access: {
+          balances: true,
+          transactions: true,
+          valid_until: validUntil,
+        },
+        redirectUrl: serverConfig.ENABLEBANKING_SERVER + '/callback',
       },
       {
         'X-ACTUAL-TOKEN': userToken,
@@ -1176,6 +1479,7 @@ async function unlinkAccount({ id }: { id: AccountEntity['id'] }) {
   }
 
   const isGoCardless = accRow.account_sync_source === 'goCardless';
+  const isEnableBanking = accRow.account_sync_source === 'enableBanking';
 
   await db.updateAccount({
     id,
@@ -1187,7 +1491,7 @@ async function unlinkAccount({ id }: { id: AccountEntity['id'] }) {
     account_sync_source: null,
   });
 
-  if (isGoCardless === false) {
+  if (isGoCardless === false && isEnableBanking === false) {
     return;
   }
 
@@ -1197,7 +1501,7 @@ async function unlinkAccount({ id }: { id: AccountEntity['id'] }) {
   );
 
   // No more accounts are associated with this bank. We can remove
-  // it from GoCardless.
+  // it from the upstream bank sync provider.
   const userToken = await asyncStorage.getItem('user-token');
   if (!userToken) {
     return 'ok';
@@ -1218,18 +1522,30 @@ async function unlinkAccount({ id }: { id: AccountEntity['id'] }) {
       throw new Error('Failed to get server config.');
     }
 
-    const requisitionId = bank.bank_id;
-
     try {
-      await post(
-        serverConfig.GOCARDLESS_SERVER + '/remove-account',
-        {
-          requisitionId,
-        },
-        {
-          'X-ACTUAL-TOKEN': userToken,
-        },
-      );
+      if (isGoCardless) {
+        const requisitionId = bank.bank_id;
+        await post(
+          serverConfig.GOCARDLESS_SERVER + '/remove-account',
+          {
+            requisitionId,
+          },
+          {
+            'X-ACTUAL-TOKEN': userToken,
+          },
+        );
+      } else if (isEnableBanking) {
+        const sessionId = bank.bank_id;
+        await post(
+          serverConfig.ENABLEBANKING_SERVER + '/remove-account',
+          {
+            sessionId,
+          },
+          {
+            'X-ACTUAL-TOKEN': userToken,
+          },
+        );
+      }
     } catch (error) {
       logger.log({ error });
     }
@@ -1247,6 +1563,7 @@ app.method('account-properties', getAccountProperties);
 app.method('gocardless-accounts-link', linkGoCardlessAccount);
 app.method('simplefin-accounts-link', linkSimpleFinAccount);
 app.method('pluggyai-accounts-link', linkPluggyAiAccount);
+app.method('enablebanking-accounts-link', linkEnableBankingAccount);
 app.method('account-create', mutator(undoable(createAccount)));
 app.method('account-close', mutator(closeAccount));
 app.method('account-reopen', mutator(undoable(reopenAccount)));
@@ -1255,13 +1572,19 @@ app.method('secret-set', setSecret);
 app.method('secret-check', checkSecret);
 app.method('gocardless-poll-web-token', pollGoCardlessWebToken);
 app.method('gocardless-poll-web-token-stop', stopGoCardlessWebTokenPolling);
+app.method('enablebanking-poll-auth', pollEnableBankingAuth);
+app.method('enablebanking-poll-auth-stop', stopEnableBankingAuthPolling);
 app.method('gocardless-status', goCardlessStatus);
 app.method('simplefin-status', simpleFinStatus);
 app.method('pluggyai-status', pluggyAiStatus);
+app.method('enablebanking-status', enableBankingStatus);
 app.method('simplefin-accounts', simpleFinAccounts);
 app.method('pluggyai-accounts', pluggyAiAccounts);
+app.method('enablebanking-accounts', enableBankingAccounts);
+app.method('enablebanking-get-aspsps', getEnableBankingAspsps);
 app.method('gocardless-get-banks', getGoCardlessBanks);
 app.method('gocardless-create-web-token', createGoCardlessWebToken);
+app.method('enablebanking-create-auth', createEnableBankingAuth);
 app.method('accounts-bank-sync', accountsBankSync);
 app.method('simplefin-batch-sync', simpleFinBatchSync);
 app.method('transactions-import', mutator(undoable(importTransactions)));

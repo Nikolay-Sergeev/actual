@@ -296,6 +296,107 @@ async function downloadPluggyAiTransactions(
   return retVal;
 }
 
+async function downloadEnableBankingTransactions(
+  acctId: string,
+  bankId: string,
+  since: string,
+) {
+  const userToken = await asyncStorage.getItem('user-token');
+  if (!userToken) return;
+
+  logger.log('Pulling transactions from Enable Banking');
+
+  let continuationKey: string | null = null;
+  let includeBalance = true;
+  let accountBalance = [];
+  let startingBalance = 0;
+  const allTransactions = [];
+  const seenContinuationKeys = new Set<string>();
+
+  do {
+    // `post` is not strictly typed; validate the payload before using it.
+    const res: unknown = await post(
+      getServer().ENABLEBANKING_SERVER + '/transactions',
+      {
+        accountId: acctId,
+        sessionId: bankId,
+        startDate: since,
+        continuationKey,
+        includeBalance,
+      },
+      {
+        'X-ACTUAL-TOKEN': userToken,
+      },
+      60000,
+    );
+
+    if (!res || typeof res !== 'object') {
+      throw new Error('Enable Banking returned an invalid transactions page');
+    }
+    const page = res as {
+      balances?: unknown;
+      continuation_key?: unknown;
+      error?: unknown;
+      error_code?: unknown;
+      error_type?: unknown;
+      startingBalance?: unknown;
+      transactions?: unknown;
+    };
+
+    if (typeof page.error_code === 'string' && page.error_code !== '') {
+      const errorType =
+        typeof page.error_type === 'string' && page.error_type !== ''
+          ? page.error_type
+          : 'Connection';
+      throw BankSyncError(errorType, page.error_code);
+    }
+    if (typeof page.error === 'string' && page.error !== '') {
+      throw BankSyncError('Connection', page.error);
+    }
+
+    const transactions =
+      page.transactions && typeof page.transactions === 'object'
+        ? (page.transactions as { all?: unknown }).all
+        : undefined;
+    if (!Array.isArray(transactions)) {
+      throw new Error('Enable Banking returned invalid transactions');
+    }
+    allTransactions.push(...transactions);
+
+    if (includeBalance) {
+      if (
+        !Array.isArray(page.balances) ||
+        typeof page.startingBalance !== 'number'
+      ) {
+        throw new Error('Enable Banking returned invalid balance data');
+      }
+      accountBalance = page.balances;
+      startingBalance = page.startingBalance;
+      includeBalance = false;
+    }
+
+    continuationKey =
+      typeof page.continuation_key === 'string' ? page.continuation_key : null;
+    if (continuationKey) {
+      if (seenContinuationKeys.has(continuationKey)) {
+        throw new Error(
+          'Enable Banking returned a repeated continuation key while paginating transactions',
+        );
+      }
+      seenContinuationKeys.add(continuationKey);
+    }
+  } while (continuationKey);
+
+  const retVal = {
+    transactions: allTransactions,
+    accountBalance,
+    startingBalance,
+  };
+
+  logger.log('Response:', retVal);
+  return retVal;
+}
+
 async function resolvePayee(trans, payeeName, payeesToCreate) {
   if (trans.payee == null && payeeName) {
     // First check our registry of new payees (to avoid a db access)
@@ -1045,6 +1146,12 @@ export async function syncAccount(
       bankId,
       syncStartDate,
       newAccount,
+    );
+  } else if (acctRow.account_sync_source === 'enableBanking') {
+    download = await downloadEnableBankingTransactions(
+      acctId,
+      bankId,
+      syncStartDate,
     );
   } else {
     throw new Error(

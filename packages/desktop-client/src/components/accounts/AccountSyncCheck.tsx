@@ -12,6 +12,7 @@ import { type AccountEntity } from 'loot-core/types/models';
 
 import { unlinkAccount } from '@desktop-client/accounts/accountsSlice';
 import { Link } from '@desktop-client/components/common/Link';
+import { authorizeEnableBanking } from '@desktop-client/enablebanking';
 import { authorizeBank } from '@desktop-client/gocardless';
 import { useAccounts } from '@desktop-client/hooks/useAccounts';
 import { useFailedAccounts } from '@desktop-client/hooks/useFailedAccounts';
@@ -99,6 +100,11 @@ export function AccountSyncCheck() {
       setOpen(false);
 
       if (acc.account_id) {
+        if (acc.account_sync_source === 'enableBanking') {
+          authorizeEnableBanking(dispatch);
+          return;
+        }
+
         authorizeBank(dispatch);
       }
     },

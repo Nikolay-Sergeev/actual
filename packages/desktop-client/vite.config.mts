@@ -191,6 +191,9 @@ export default defineConfig(async ({ mode }) => {
               navigateFallbackDenylist: [
                 /^\/account\/.*$/,
                 /^\/admin\/.*$/,
+                // Allow bank-provider redirects to reach the server. If we serve the SPA shell here,
+                // the backend won't receive the authorization code/state.
+                /^\/enablebanking\/.*$/,
                 /^\/secret\/.*$/,
                 /^\/openid\/.*$/,
                 /^\/plugins\/.*$/,
