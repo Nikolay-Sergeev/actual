@@ -30,6 +30,19 @@ const TEMP_PENDING_AUTH_PREFIX = 'enablebanking_tmp_pending_auth:';
 const TEMP_AUTH_RESULT_PREFIX = 'enablebanking_tmp_auth_result:';
 const TEMP_SESSION_PSU_HEADERS_PREFIX = 'enablebanking_tmp_session_psu:';
 
+function normalizeApplicationId(applicationId) {
+  if (typeof applicationId !== 'string') {
+    return applicationId;
+  }
+
+  // The control panel typically shows a UUID, but users often copy/paste it with
+  // wrappers like "(...)" or "{...}". Strip a single layer of wrappers.
+  return applicationId
+    .trim()
+    .replace(/^[\s([{'"`]+/, '')
+    .replace(/[\s)\]}'"`]+$/, '');
+}
+
 class EnableBankingApiError extends Error {
   constructor(message, status, details) {
     super(message);
@@ -40,8 +53,8 @@ class EnableBankingApiError extends Error {
 }
 
 function getEnableBankingConfig() {
-  const applicationId = secretsService.get(
-    SecretName.enablebanking_applicationId,
+  const applicationId = normalizeApplicationId(
+    secretsService.get(SecretName.enablebanking_applicationId),
   );
   const privateKey = secretsService.get(SecretName.enablebanking_privateKey);
   const redirectUrl = secretsService.get(SecretName.enablebanking_redirectUrl);
