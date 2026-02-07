@@ -17,8 +17,10 @@ describe('Enable Banking integration (loot-core)', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    delete mockSyncServer.handlers['/enablebanking/transactions'];
-    delete mockSyncServer.handlers['/enablebanking/remove-account'];
+    // `mockSyncServer.handlers` is untyped; cast locally to keep this test strict.
+    const handlers = mockSyncServer.handlers as Record<string, unknown>;
+    delete handlers['/enablebanking/transactions'];
+    delete handlers['/enablebanking/remove-account'];
   });
 
   test('syncAccount uses enablebanking provider route', async () => {
@@ -31,8 +33,8 @@ describe('Enable Banking integration (loot-core)', () => {
       balances: [],
       startingBalance: 0,
     }));
-    mockSyncServer.handlers['/enablebanking/transactions'] =
-      transactionsHandler;
+    const handlers = mockSyncServer.handlers as Record<string, unknown>;
+    handlers['/enablebanking/transactions'] = transactionsHandler;
 
     await db.insertAccount({
       id: 'acc-enablebanking',
@@ -129,8 +131,8 @@ describe('Enable Banking integration (loot-core)', () => {
 
   test('account-unlink removes upstream session when last enableBanking account is unlinked', async () => {
     const removeAccountHandler = vi.fn(() => ({ message: 'OK' }));
-    mockSyncServer.handlers['/enablebanking/remove-account'] =
-      removeAccountHandler;
+    const handlers = mockSyncServer.handlers as Record<string, unknown>;
+    handlers['/enablebanking/remove-account'] = removeAccountHandler;
 
     await db.insertWithUUID('banks', {
       id: 'bank-row',
@@ -171,8 +173,8 @@ describe('Enable Banking integration (loot-core)', () => {
 
   test('account-unlink does not remove upstream session when other linked accounts remain', async () => {
     const removeAccountHandler = vi.fn(() => ({ message: 'OK' }));
-    mockSyncServer.handlers['/enablebanking/remove-account'] =
-      removeAccountHandler;
+    const handlers = mockSyncServer.handlers as Record<string, unknown>;
+    handlers['/enablebanking/remove-account'] = removeAccountHandler;
 
     await db.insertWithUUID('banks', {
       id: 'bank-shared',

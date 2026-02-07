@@ -11,8 +11,7 @@ import { type Message } from '../sync';
 
 import { basic as defaultMockData } from './mockData.json';
 
-type MockHandler = (data?: unknown) => unknown | Promise<unknown>;
-const handlers: Record<string, MockHandler> = {};
+const handlers = {};
 let currentMockData = defaultMockData;
 let currentClock = makeClock(new Timestamp(0, 0, '0000000000000000'));
 let currentMessages: {
@@ -41,11 +40,7 @@ handlers['/'] = () => {
   return 'development';
 };
 
-handlers['/sync/sync'] = async (data?: unknown): Promise<Uint8Array> => {
-  if (!(data instanceof Uint8Array)) {
-    throw new Error('Expected sync request to be Uint8Array');
-  }
-
+handlers['/sync/sync'] = async (data: Uint8Array): Promise<Uint8Array> => {
   const requestPb = SyncProtoBuf.SyncRequest.deserializeBinary(data);
   const since = requestPb.getSince();
   const messages = requestPb.getMessagesList();
