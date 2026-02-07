@@ -767,9 +767,10 @@ app.post(
       psuId,
     } = req.body || {};
     const { redirectUrl: configuredRedirectUrl } = getEnableBankingConfig();
-    // Prefer callback URL passed by Actual for the active server origin.
+    // Prefer explicitly configured callback URL (public/reverse-proxied setups),
+    // then caller-provided URL, then request-derived fallback.
     const callbackUrl =
-      redirectUrl || configuredRedirectUrl || getDefaultRedirectUrl(req);
+      configuredRedirectUrl || redirectUrl || getDefaultRedirectUrl(req);
 
     if (!callbackUrl) {
       throw new EnableBankingApiError('WRONG_REQUEST_PARAMETERS', 400, {

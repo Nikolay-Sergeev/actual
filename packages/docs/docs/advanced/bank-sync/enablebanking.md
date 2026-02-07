@@ -33,6 +33,11 @@ For reference, these values are stored in server secrets as:
 - `enablebanking_applicationId`
 - `enablebanking_privateKey`
 - `enablebanking_environment`
+- `enablebanking_redirectUrl`
+
+If your Actual server runs behind a reverse proxy, Docker bridge, or any
+non-direct/public origin mapping, set `enablebanking_redirectUrl` to the public
+callback URL that the bank can reach.
 
 ## 3. Link your bank accounts
 

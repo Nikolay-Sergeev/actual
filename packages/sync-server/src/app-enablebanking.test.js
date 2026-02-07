@@ -196,6 +196,57 @@ describe('app-enablebanking', () => {
     expect(pollRes.body.data.session_id).toBe('session-xyz');
   });
 
+  it('prefers configured redirectUrl secret over request redirectUrl', async () => {
+    secretsService.set(
+      SecretName.enablebanking_redirectUrl,
+      'https://public.actual.example/enablebanking/callback',
+    );
+
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          aspsps: [
+            {
+              name: 'Test Bank',
+              country: 'LT',
+              maximum_consent_validity: 86400,
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          url: 'https://enablebanking.com/auth',
+          authorization_id: 'auth-override',
+        }),
+      });
+
+    const res = await authenticatedPost('/create-auth', {
+      aspsp: { name: 'Test Bank', country: 'LT' },
+      access: {
+        balances: true,
+        transactions: true,
+        valid_until: '2026-02-01T00:00:00.000Z',
+      },
+      redirectUrl: 'http://localhost:5006/enablebanking/callback',
+      state: 'state-override',
+      psuType: 'personal',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.data.redirect_url).toBe(
+      'https://public.actual.example/enablebanking/callback',
+    );
+
+    const [, authOptions] = global.fetch.mock.calls[1];
+    const authBody = JSON.parse(authOptions.body);
+    expect(authBody.redirect_url).toBe(
+      'https://public.actual.example/enablebanking/callback',
+    );
+  });
+
   it('caps valid_until in create-auth by ASPSP maximum consent validity', async () => {
     vi.useFakeTimers();
     try {
