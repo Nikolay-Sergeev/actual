@@ -22,8 +22,8 @@ import {
 } from 'loot-core/types/models';
 
 import {
-  linkAccountEnableBanking,
   linkAccount,
+  linkAccountEnableBanking,
   linkAccountPluggyAi,
   linkAccountSimpleFin,
   unlinkAccount,

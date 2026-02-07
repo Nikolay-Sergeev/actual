@@ -24,13 +24,13 @@ import {
   ModalHeader,
 } from '@desktop-client/components/common/Modal';
 import { useMultiuserEnabled } from '@desktop-client/components/ServerContext';
+import { authorizeEnableBanking } from '@desktop-client/enablebanking';
 import { authorizeBank } from '@desktop-client/gocardless';
-import { useGoCardlessStatus } from '@desktop-client/hooks/useGoCardlessStatus';
 import { useEnableBankingStatus } from '@desktop-client/hooks/useEnableBankingStatus';
+import { useGoCardlessStatus } from '@desktop-client/hooks/useGoCardlessStatus';
 import { usePluggyAiStatus } from '@desktop-client/hooks/usePluggyAiStatus';
 import { useSimpleFinStatus } from '@desktop-client/hooks/useSimpleFinStatus';
 import { useSyncServerStatus } from '@desktop-client/hooks/useSyncServerStatus';
-import { authorizeEnableBanking } from '@desktop-client/enablebanking';
 import {
   pushModal,
   type Modal as ModalType,
@@ -708,9 +708,7 @@ export function CreateAccountModal({
                         </Trans>{' '}
                         {[
                           isGoCardlessSetupComplete ? '' : 'GoCardless',
-                          isEnableBankingSetupComplete
-                            ? ''
-                            : 'Enable Banking',
+                          isEnableBankingSetupComplete ? '' : 'Enable Banking',
                           isSimpleFinSetupComplete ? '' : 'SimpleFIN',
                           isPluggyAiSetupComplete ? '' : 'Pluggy.ai',
                         ]

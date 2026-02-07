@@ -36,7 +36,9 @@ class EnableBankingApiError extends Error {
 }
 
 function getEnableBankingConfig() {
-  const applicationId = secretsService.get(SecretName.enablebanking_applicationId);
+  const applicationId = secretsService.get(
+    SecretName.enablebanking_applicationId,
+  );
   const privateKey = secretsService.get(SecretName.enablebanking_privateKey);
   const environment = (
     secretsService.get(SecretName.enablebanking_environment) || 'SANDBOX'
@@ -53,9 +55,7 @@ function isEnableBankingConfigured() {
   const { applicationId, privateKey, environment } = getEnableBankingConfig();
 
   return Boolean(
-    applicationId &&
-      privateKey &&
-      ENABLE_BANKING_ENVIRONMENTS.has(environment),
+    applicationId && privateKey && ENABLE_BANKING_ENVIRONMENTS.has(environment),
   );
 }
 
@@ -270,7 +270,8 @@ function normalizeAccount({ account, aspsp, fallbackSessionAccount = null }) {
       fallbackSessionAccount?.uid ||
       randomUUID(),
     identification_hash:
-      account.identification_hash || fallbackSessionAccount?.identification_hash,
+      account.identification_hash ||
+      fallbackSessionAccount?.identification_hash,
     institution: aspsp?.name ?? 'Unknown',
     orgDomain: aspsp?.country ?? null,
     orgId: aspsp?.name ?? 'Unknown',
@@ -310,7 +311,10 @@ function mapEnableBankingSyncError(error) {
       error.details?.message ||
       error.message;
 
-    if (providerErrorCode === 'ASPSP_RATE_LIMIT_EXCEEDED' || error.status === 429) {
+    if (
+      providerErrorCode === 'ASPSP_RATE_LIMIT_EXCEEDED' ||
+      error.status === 429
+    ) {
       return {
         error_type: 'RATE_LIMIT_EXCEEDED',
         error_code: 'ENABLEBANKING_ERROR',
@@ -361,8 +365,12 @@ function mapEnableBankingSyncError(error) {
 app.get('/callback', (req, res) => {
   cleanupAuthCache();
 
-  const { state, code, error, error_description: errorDescription } =
-    req.query ?? {};
+  const {
+    state,
+    code,
+    error,
+    error_description: errorDescription,
+  } = req.query ?? {};
 
   if (typeof state === 'string' && state.length > 0) {
     authResultByState.set(state, {

@@ -4,6 +4,20 @@ import { type EnableBankingAuthResult } from 'loot-core/types/models';
 import { pushModal } from './modals/modalsSlice';
 import { type AppDispatch } from './redux/store';
 
+type EnableBankingAuthPollResult =
+  | { error: 'timeout' }
+  | { error: 'unknown'; message?: string }
+  | { data: EnableBankingAuthResult };
+
+type EnableBankingCreateAuthResponse = {
+  url?: string;
+  authorization_id?: string;
+  reason?: string;
+  error_description?: string;
+  error?: string;
+  error_code?: string;
+};
+
 function _authorize(
   dispatch: AppDispatch,
   {
@@ -20,10 +34,10 @@ function _authorize(
         name: 'enablebanking-external-msg',
         options: {
           onMoveExternal: async ({ aspsp }) => {
-            const resp = await send('enablebanking-create-auth', {
+            const resp = (await send('enablebanking-create-auth', {
               aspsp,
               accessValidForDays: 90,
-            });
+            })) as EnableBankingCreateAuthResponse;
 
             if (
               'error' in resp ||
@@ -44,9 +58,22 @@ function _authorize(
             const { url, authorization_id: authorizationId } = resp;
             window.Actual.openURLInBrowser(url);
 
-            return send('enablebanking-poll-auth', {
+            const pollResult = (await send('enablebanking-poll-auth', {
               authorizationId,
-            });
+            })) as EnableBankingAuthPollResult;
+
+            if (
+              pollResult &&
+              typeof pollResult === 'object' &&
+              ('error' in pollResult || 'data' in pollResult)
+            ) {
+              return pollResult;
+            }
+
+            return {
+              error: 'unknown' as const,
+              message: 'authorization_failed',
+            };
           },
           onClose,
           onSuccess,

@@ -11,9 +11,9 @@ import * as monthUtils from '../../shared/months';
 import { amountToInteger } from '../../shared/util';
 import {
   type AccountEntity,
+  type CategoryEntity,
   type EnableBankingAspsp,
   type EnableBankingAuthResult,
-  type CategoryEntity,
   type GoCardlessToken,
   type ImportTransactionEntity,
   type SyncServerEnableBankingAccount,
@@ -797,9 +797,16 @@ async function pollEnableBankingAuth({
         return;
       }
 
+      if (data.status === 'error') {
+        resolve({
+          error: 'unknown',
+          message: data.message,
+        });
+        return;
+      }
+
       resolve({
         error: 'unknown',
-        message: data.message,
       });
     });
   });

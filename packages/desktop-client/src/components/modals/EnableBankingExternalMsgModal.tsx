@@ -24,8 +24,8 @@ import {
 import { FormField, FormLabel } from '@desktop-client/components/forms';
 import { COUNTRY_OPTIONS } from '@desktop-client/components/util/countries';
 import { getCountryFromBrowser } from '@desktop-client/components/util/localeToCountry';
-import { useGlobalPref } from '@desktop-client/hooks/useGlobalPref';
 import { useEnableBankingStatus } from '@desktop-client/hooks/useEnableBankingStatus';
+import { useGlobalPref } from '@desktop-client/hooks/useGlobalPref';
 import { type Modal as ModalType } from '@desktop-client/modals/modalsSlice';
 
 type EnableBankingAspspOption = EnableBankingAspsp & {
@@ -127,8 +127,11 @@ export function EnableBankingExternalMsgModal({
   } | null>(null);
 
   const data = useRef<EnableBankingAuthResult | null>(null);
-  const { data: aspspOptions, isLoading: isAspspsLoading, isError: isAspspError } =
-    useAvailableAspsps(country);
+  const {
+    data: aspspOptions,
+    isLoading: isAspspsLoading,
+    isError: isAspspError,
+  } = useAvailableAspsps(country);
   const {
     configuredEnableBanking: isConfigured,
     isLoading: isConfigurationLoading,
