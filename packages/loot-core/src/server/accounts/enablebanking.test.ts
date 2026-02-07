@@ -61,6 +61,8 @@ describe('Enable Banking integration (loot-core)', () => {
     expect(transactionsHandler).toHaveBeenCalledTimes(1);
     expect(transactionsHandler).toHaveBeenCalledWith({
       accountId: 'remote-account-id',
+      continuationKey: null,
+      includeBalance: true,
       sessionId: 'enablebanking-session-id',
       startDate: '2024-01-01',
     });

@@ -11,11 +11,12 @@ vi.mock('jws', () => ({
   },
 }));
 
-async function authenticatedPost(path, body = {}) {
-  return request(app)
-    .post(path)
-    .set('x-actual-token', 'valid-token')
-    .send(body);
+async function authenticatedPost(path, body = {}, headers = null) {
+  let req = request(app).post(path).set('x-actual-token', 'valid-token');
+  if (headers) {
+    req = req.set(headers);
+  }
+  return req.send(body);
 }
 
 function setEnableBankingSecrets() {
@@ -119,9 +120,9 @@ describe('app-enablebanking', () => {
         }),
       });
 
-    const callbackRes = await request(app).get(
-      '/callback?state=state-123&code=auth-code-123',
-    );
+    const callbackRes = await request(app)
+      .get('/callback?state=state-123&code=auth-code-123')
+      .set('User-Agent', 'EnableBankingTestUA');
     expect(callbackRes.statusCode).toBe(200);
 
     const pollRes = await authenticatedPost('/poll-auth', {
@@ -144,6 +145,56 @@ describe('app-enablebanking', () => {
     });
     expect(secondPoll.statusCode).toBe(200);
     expect(secondPoll.body.data.status).toBe('pending');
+
+    const [, sessionOptions] = global.fetch.mock.calls[0];
+    expect(sessionOptions.headers['Psu-User-Agent']).toBe(
+      'EnableBankingTestUA',
+    );
+  });
+
+  it('forwards PSU headers from create-auth request to Enable Banking /auth', async () => {
+    global.fetch
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          aspsps: [
+            {
+              name: 'Test Bank',
+              country: 'LT',
+              maximum_consent_validity: 86400,
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          url: 'https://enablebanking.com/auth',
+          authorization_id: 'auth-psu',
+        }),
+      });
+
+    const res = await authenticatedPost(
+      '/create-auth',
+      {
+        aspsp: { name: 'Test Bank', country: 'LT' },
+        access: {
+          balances: true,
+          transactions: true,
+          valid_until: '2026-02-01T00:00:00.000Z',
+        },
+        redirectUrl: 'https://example.com/callback',
+        state: 'state-psu-create',
+        psuType: 'personal',
+      },
+      { 'User-Agent': 'EnableBankingCreateUA' },
+    );
+
+    expect(res.statusCode).toBe(200);
+
+    // Second Enable Banking request is the POST /auth call.
+    const [, authOptions] = global.fetch.mock.calls[1];
+    expect(authOptions.headers['Psu-User-Agent']).toBe('EnableBankingCreateUA');
   });
 
   it('authorizes on poll-auth by authorizationId when state is not provided', async () => {

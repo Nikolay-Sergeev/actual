@@ -41,21 +41,37 @@ describe('EnableBankingInitialiseModal', () => {
     );
 
     await waitFor(() => {
-      expect(send).toHaveBeenCalledTimes(3);
+      const secretSetCalls = vi
+        .mocked(send)
+        .mock.calls.filter(([method]) => method === 'secret-set');
+      expect(secretSetCalls).toHaveLength(4);
     });
 
-    expect(send).toHaveBeenNthCalledWith(1, 'secret-set', {
-      name: 'enablebanking_applicationId',
-      value: 'test-application-id',
-    });
-    expect(send).toHaveBeenNthCalledWith(2, 'secret-set', {
-      name: 'enablebanking_privateKey',
-      value: '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
-    });
-    expect(send).toHaveBeenNthCalledWith(3, 'secret-set', {
-      name: 'enablebanking_environment',
-      value: 'PRODUCTION',
-    });
+    // A status call happens on mount to suggest a callback URL (if configured).
+    expect(send).toHaveBeenCalledWith('enablebanking-status');
+
+    const secretSetCalls = vi
+      .mocked(send)
+      .mock.calls.filter(([method]) => method === 'secret-set');
+    expect(secretSetCalls).toEqual([
+      [
+        'secret-set',
+        { name: 'enablebanking_applicationId', value: 'test-application-id' },
+      ],
+      [
+        'secret-set',
+        {
+          name: 'enablebanking_privateKey',
+          value:
+            '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
+        },
+      ],
+      [
+        'secret-set',
+        { name: 'enablebanking_environment', value: 'PRODUCTION' },
+      ],
+      ['secret-set', { name: 'enablebanking_redirectUrl', value: '' }],
+    ]);
     expect(onSuccess).toHaveBeenCalledTimes(1);
   });
 
@@ -79,7 +95,11 @@ describe('EnableBankingInitialiseModal', () => {
     expect(
       screen.getByText(/Environment must be either SANDBOX or PRODUCTION\./i),
     ).toBeInTheDocument();
-    expect(send).not.toHaveBeenCalled();
+    // Status call happens on mount, but invalid input should prevent secret writes.
+    const secretSetCalls = vi
+      .mocked(send)
+      .mock.calls.filter(([method]) => method === 'secret-set');
+    expect(secretSetCalls).toHaveLength(0);
     expect(onSuccess).not.toHaveBeenCalled();
   });
 });

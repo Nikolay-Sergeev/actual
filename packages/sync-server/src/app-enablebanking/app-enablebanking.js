@@ -700,7 +700,11 @@ function mapEnableBankingSyncError(error) {
   };
 }
 
-function findCallbackResultForPendingAuth({ authState, authorizationId, pending }) {
+function findCallbackResultForPendingAuth({
+  authState,
+  authorizationId,
+  pending,
+}) {
   const directMatch = getTemporaryEntry(TEMP_AUTH_RESULT_PREFIX, authState);
   if (directMatch) {
     return { state: authState, result: directMatch };
@@ -820,6 +824,10 @@ app.post(
       language,
       psuId,
     } = req.body || {};
+    // Capture PSU headers early so we can forward them to /auth and also
+    // fall back to them in /poll-auth in case the callback request doesn't
+    // include these headers (proxy setups, strict browser policies, etc).
+    const initialPsuHeaders = getPsuHeadersFromRequest(req);
     const { redirectUrl: configuredRedirectUrl } = getEnableBankingConfig();
     // Prefer explicitly configured callback URL (public/reverse-proxied setups),
     // then caller-provided URL, then request-derived fallback.
@@ -846,6 +854,7 @@ app.post(
       data = await enableBankingRequest({
         path: '/auth',
         method: 'POST',
+        headers: initialPsuHeaders,
         body: {
           aspsp,
           access: normalizedAccess,
@@ -882,6 +891,7 @@ app.post(
     if (data.authorization_id) {
       setTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, data.authorization_id, {
         state,
+        psuHeaders: initialPsuHeaders,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       });
@@ -1010,17 +1020,19 @@ app.post(
       return;
     }
 
+    const psuHeaders = callbackResult.psuHeaders || pending?.psuHeaders || null;
     const session = await enableBankingRequest({
       path: '/sessions',
       method: 'POST',
+      headers: psuHeaders,
       body: {
         code: callbackResult.code,
       },
     });
 
-    if (session.session_id && callbackResult.psuHeaders) {
+    if (session.session_id && psuHeaders) {
       setTemporaryEntry(TEMP_SESSION_PSU_HEADERS_PREFIX, session.session_id, {
-        headers: callbackResult.psuHeaders,
+        headers: psuHeaders,
         updatedAt: Date.now(),
       });
     }
@@ -1031,7 +1043,7 @@ app.post(
         ...(pending ?? {}),
         state: callbackState,
         sessionId: session.session_id,
-        psuHeaders: callbackResult.psuHeaders || pending?.psuHeaders || null,
+        psuHeaders,
         createdAt: Number(pending?.createdAt ?? Date.now()),
         updatedAt: Date.now(),
       });
@@ -1041,7 +1053,7 @@ app.post(
       {
         sessionId: session.session_id,
         session,
-        psuHeaders: callbackResult.psuHeaders,
+        psuHeaders,
       },
     );
 
