@@ -369,6 +369,69 @@ function normalizeAccount({ account, aspsp, fallbackSessionAccount = null }) {
   };
 }
 
+function getSessionAccountIds(session) {
+  const accountIdsFromAccounts =
+    session.accounts
+      ?.map(account =>
+        typeof account === 'string' ? account : (account?.uid ?? null),
+      )
+      .filter(Boolean) ?? [];
+
+  if (accountIdsFromAccounts.length > 0) {
+    return accountIdsFromAccounts;
+  }
+
+  return (
+    session.accounts_data?.map(account => account?.uid).filter(Boolean) ?? []
+  );
+}
+
+async function getNormalizedSessionAccounts({
+  sessionId,
+  session = null,
+  psuHeaders = null,
+}) {
+  const activeSession =
+    session ??
+    (await enableBankingRequest({
+      path: `/sessions/${sessionId}`,
+      method: 'GET',
+    }));
+
+  const accountIds = getSessionAccountIds(activeSession);
+  if (accountIds.length === 0) {
+    return { session: activeSession, accounts: [] };
+  }
+
+  const detailedAccounts = await Promise.all(
+    accountIds.map(async accountId => {
+      try {
+        return await enableBankingRequest({
+          path: `/accounts/${accountId}/details`,
+          method: 'GET',
+          headers: psuHeaders,
+        });
+      } catch {
+        return null;
+      }
+    }),
+  );
+
+  const accounts = accountIds
+    .map((accountId, index) =>
+      normalizeAccount({
+        account: detailedAccounts[index] ?? { uid: accountId },
+        aspsp: activeSession.aspsp,
+        fallbackSessionAccount: activeSession.accounts_data?.find(
+          account => account.uid === accountId,
+        ),
+      }),
+    )
+    .filter(account => Boolean(account.account_id));
+
+  return { session: activeSession, accounts };
+}
+
 function getHeaderValue(req, headerName) {
   const value = req.get(headerName);
   if (Array.isArray(value)) {
@@ -843,19 +906,34 @@ app.post(
     }
     deleteTemporaryEntry(TEMP_AUTH_RESULT_PREFIX, authState);
 
+    const { accounts: normalizedAccounts } = await getNormalizedSessionAccounts(
+      {
+        sessionId: session.session_id,
+        session,
+        psuHeaders: callbackResult.psuHeaders,
+      },
+    );
+
+    if (normalizedAccounts.length === 0) {
+      res.send({
+        status: 'ok',
+        data: {
+          status: 'error',
+          error: 'NO_ACCOUNTS_ADDED',
+          error_description:
+            'Authorization completed but no accounts were shared by the bank. Please retry and make sure at least one account is selected in the bank consent flow.',
+          session_id: session.session_id,
+        },
+      });
+      return;
+    }
+
     res.send({
       status: 'ok',
       data: {
         status: 'authorized',
         ...session,
-        accounts: (session.accounts ?? [])
-          .map(account =>
-            normalizeAccount({
-              account,
-              aspsp: session.aspsp,
-            }),
-          )
-          .filter(account => Boolean(account.account_id)),
+        accounts: normalizedAccounts,
       },
     });
   }),
@@ -866,43 +944,10 @@ app.post(
   handleError(async (req, res) => {
     const { sessionId } = req.body || {};
     const psuHeaders = getSessionPsuHeaders(sessionId);
-
-    const session = await enableBankingRequest({
-      path: `/sessions/${sessionId}`,
-      method: 'GET',
+    const { accounts } = await getNormalizedSessionAccounts({
+      sessionId,
+      psuHeaders,
     });
-
-    const accountIds =
-      Array.isArray(session.accounts) && session.accounts.length > 0
-        ? session.accounts
-        : (session.accounts_data?.map(account => account.uid).filter(Boolean) ??
-          []);
-
-    const detailedAccounts = await Promise.all(
-      accountIds.map(async accountId => {
-        try {
-          return await enableBankingRequest({
-            path: `/accounts/${accountId}/details`,
-            method: 'GET',
-            headers: psuHeaders,
-          });
-        } catch {
-          return null;
-        }
-      }),
-    );
-
-    const accounts = accountIds
-      .map((accountId, index) =>
-        normalizeAccount({
-          account: detailedAccounts[index] ?? { uid: accountId },
-          aspsp: session.aspsp,
-          fallbackSessionAccount: session.accounts_data?.find(
-            account => account.uid === accountId,
-          ),
-        }),
-      )
-      .filter(account => Boolean(account.account_id));
 
     res.send({
       status: 'ok',
