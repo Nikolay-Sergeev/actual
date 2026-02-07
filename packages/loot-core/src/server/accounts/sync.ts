@@ -314,7 +314,8 @@ async function downloadEnableBankingTransactions(
   const seenContinuationKeys = new Set<string>();
 
   do {
-    const res = await post(
+    // `post` is not strictly typed; validate the payload before using it.
+    const res: unknown = await post(
       getServer().ENABLEBANKING_SERVER + '/transactions',
       {
         accountId: acctId,
@@ -329,22 +330,53 @@ async function downloadEnableBankingTransactions(
       60000,
     );
 
-    if (res.error_code) {
-      throw BankSyncError(res.error_type, res.error_code);
-    } else if ('error' in res) {
-      throw BankSyncError('Connection', res.error);
+    if (!res || typeof res !== 'object') {
+      throw new Error('Enable Banking returned an invalid transactions page');
+    }
+    const page = res as {
+      balances?: unknown;
+      continuation_key?: unknown;
+      error?: unknown;
+      error_code?: unknown;
+      error_type?: unknown;
+      startingBalance?: unknown;
+      transactions?: unknown;
+    };
+
+    if (typeof page.error_code === 'string' && page.error_code !== '') {
+      const errorType =
+        typeof page.error_type === 'string' && page.error_type !== ''
+          ? page.error_type
+          : 'Connection';
+      throw BankSyncError(errorType, page.error_code);
+    }
+    if (typeof page.error === 'string' && page.error !== '') {
+      throw BankSyncError('Connection', page.error);
     }
 
-    const page = res as BankSyncResponse & { continuation_key?: string | null };
-    allTransactions.push(...(page.transactions?.all ?? []));
+    const transactions =
+      page.transactions && typeof page.transactions === 'object'
+        ? (page.transactions as { all?: unknown }).all
+        : undefined;
+    if (!Array.isArray(transactions)) {
+      throw new Error('Enable Banking returned invalid transactions');
+    }
+    allTransactions.push(...transactions);
 
     if (includeBalance) {
+      if (
+        !Array.isArray(page.balances) ||
+        typeof page.startingBalance !== 'number'
+      ) {
+        throw new Error('Enable Banking returned invalid balance data');
+      }
       accountBalance = page.balances;
       startingBalance = page.startingBalance;
       includeBalance = false;
     }
 
-    continuationKey = page.continuation_key ?? null;
+    continuationKey =
+      typeof page.continuation_key === 'string' ? page.continuation_key : null;
     if (continuationKey) {
       if (seenContinuationKeys.has(continuationKey)) {
         throw new Error(
