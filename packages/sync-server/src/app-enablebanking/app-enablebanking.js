@@ -54,6 +54,8 @@ class EnableBankingApiError extends Error {
   }
 }
 
+let cachedJwt = null;
+
 function getEnableBankingConfig() {
   const applicationId = normalizeApplicationId(
     secretsService.get(SecretName.enablebanking_applicationId),
@@ -146,6 +148,20 @@ function createEnableBankingJwt() {
     },
     privateKey: normalizePrivateKey(privateKey),
   });
+}
+
+function createEnableBankingJwtCached() {
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (cachedJwt && cachedJwt.expiresAtSeconds - 10 > nowSeconds) {
+    return cachedJwt.token;
+  }
+
+  const token = createEnableBankingJwt();
+  cachedJwt = {
+    token,
+    expiresAtSeconds: nowSeconds + Math.min(MAX_JWT_TTL_SECONDS, 60 * 60),
+  };
+  return token;
 }
 
 function getTemporaryEntry(prefix, key) {
@@ -259,7 +275,7 @@ async function enableBankingRequest({
   body = null,
   headers = null,
 }) {
-  const jwt = createEnableBankingJwt();
+  const jwt = createEnableBankingJwtCached();
 
   const url = `${ENABLE_BANKING_API_URL}${path}${getQueryString(query)}`;
   const response = await fetch(url, {
