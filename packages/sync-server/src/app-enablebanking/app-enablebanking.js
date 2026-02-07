@@ -151,8 +151,14 @@ function createEnableBankingJwt() {
 }
 
 function createEnableBankingJwtCached() {
+  const { applicationId, privateKey, environment } = getEnableBankingConfig();
+  const cacheKey = JSON.stringify({ applicationId, privateKey, environment });
   const nowSeconds = Math.floor(Date.now() / 1000);
-  if (cachedJwt && cachedJwt.expiresAtSeconds - 10 > nowSeconds) {
+  if (
+    cachedJwt &&
+    cachedJwt.cacheKey === cacheKey &&
+    cachedJwt.expiresAtSeconds - 10 > nowSeconds
+  ) {
     return cachedJwt.token;
   }
 
@@ -160,6 +166,7 @@ function createEnableBankingJwtCached() {
   cachedJwt = {
     token,
     expiresAtSeconds: nowSeconds + Math.min(MAX_JWT_TTL_SECONDS, 60 * 60),
+    cacheKey,
   };
   return token;
 }
