@@ -1078,7 +1078,8 @@ async function createEnableBankingAuth({
     throw new Error('Failed to get server config.');
   }
 
-  const consentDays = Math.max(1, Math.min(accessValidForDays, 1));
+  // Keep consent bounded while honoring caller-provided duration.
+  const consentDays = Math.max(1, Math.min(accessValidForDays, 90));
   const validUntil = new Date(
     Date.now() + consentDays * 24 * 60 * 60 * 1000,
   ).toISOString();

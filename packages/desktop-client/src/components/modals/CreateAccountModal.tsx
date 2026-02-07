@@ -211,16 +211,14 @@ export function CreateAccountModal({
       );
     } catch (err) {
       console.error(err);
-      dispatch(
-        addNotification({
-          notification: {
-            type: 'error',
-            title: t('Error when trying to contact Pluggy.ai'),
-            message: (err as Error).message,
-            timeout: 5000,
-          },
-        }),
-      );
+      addNotification({
+        notification: {
+          type: 'error',
+          title: t('Error when trying to contact Pluggy.ai'),
+          message: (err as Error).message,
+          timeout: 5000,
+        },
+      });
       dispatch(
         pushModal({
           modal: {
