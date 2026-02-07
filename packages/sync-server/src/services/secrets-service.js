@@ -18,6 +18,7 @@ export const SecretName = {
   enablebanking_applicationId: 'enablebanking_applicationId',
   enablebanking_privateKey: 'enablebanking_privateKey',
   enablebanking_environment: 'enablebanking_environment',
+  enablebanking_redirectUrl: 'enablebanking_redirectUrl',
 };
 
 class SecretsDb {

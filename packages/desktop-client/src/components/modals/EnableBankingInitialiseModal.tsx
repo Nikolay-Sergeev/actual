@@ -1,5 +1,5 @@
 // @ts-strict-ignore
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { TextArea } from 'react-aria-components';
 import { Trans, useTranslation } from 'react-i18next';
 
@@ -37,6 +37,8 @@ export function EnableBankingInitialiseModal({
   const [applicationId, setApplicationId] = useState('');
   const [privateKey, setPrivateKey] = useState('');
   const [environment, setEnvironment] = useState('SANDBOX');
+  const [redirectUrl, setRedirectUrl] = useState('');
+  const [suggestedRedirectUrl, setSuggestedRedirectUrl] = useState('');
   const [isValid, setIsValid] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(
@@ -47,6 +49,7 @@ export function EnableBankingInitialiseModal({
 
   const onSubmit = async (close: () => void) => {
     const normalizedEnvironment = environment.trim().toUpperCase();
+    const normalizedRedirectUrl = redirectUrl.trim();
 
     if (!applicationId || !privateKey || !normalizedEnvironment) {
       setIsValid(false);
@@ -62,6 +65,16 @@ export function EnableBankingInitialiseModal({
       setIsValid(false);
       setError(t('Environment must be either SANDBOX or PRODUCTION.'));
       return;
+    }
+
+    if (normalizedRedirectUrl) {
+      try {
+        new URL(normalizedRedirectUrl);
+      } catch {
+        setIsValid(false);
+        setError(t('Redirect URL must be a valid absolute URL.'));
+        return;
+      }
     }
 
     setIsLoading(true);
@@ -105,11 +118,40 @@ export function EnableBankingInitialiseModal({
       return;
     }
 
+    ({ error, reason } =
+      (await send('secret-set', {
+        name: 'enablebanking_redirectUrl',
+        value: normalizedRedirectUrl,
+      })) || {});
+
+    if (error) {
+      setIsLoading(false);
+      setIsValid(false);
+      setError(getSecretsError(error, reason));
+      return;
+    }
+
     setIsValid(true);
     onSuccess();
     setIsLoading(false);
     close();
   };
+
+  useEffect(() => {
+    async function loadSuggestedRedirectUrl() {
+      const status = await send('enablebanking-status');
+      if (!status?.callback_url) {
+        return;
+      }
+
+      setSuggestedRedirectUrl(status.callback_url);
+      setRedirectUrl(current =>
+        current.trim() === '' ? status.callback_url : current,
+      );
+    }
+
+    void loadSuggestedRedirectUrl();
+  }, []);
 
   return (
     <Modal
@@ -194,6 +236,29 @@ export function EnableBankingInitialiseModal({
                   setIsValid(true);
                 }}
               />
+            </FormField>
+
+            <FormField>
+              <FormLabel
+                title={t('Callback URL (redirect_url):')}
+                htmlFor="enablebanking-redirect-url-field"
+              />
+              <Input
+                id="enablebanking-redirect-url-field"
+                type="text"
+                value={redirectUrl}
+                placeholder={suggestedRedirectUrl || 'https://.../callback'}
+                onChangeValue={value => {
+                  setRedirectUrl(value);
+                  setIsValid(true);
+                }}
+              />
+              <Text style={{ fontSize: 12 }}>
+                <Trans>
+                  This URL must be added to your Enable Banking app redirect
+                  URLs.
+                </Trans>
+              </Text>
             </FormField>
 
             {!isValid && <Error>{error}</Error>}

@@ -44,6 +44,7 @@ function getEnableBankingConfig() {
     SecretName.enablebanking_applicationId,
   );
   const privateKey = secretsService.get(SecretName.enablebanking_privateKey);
+  const redirectUrl = secretsService.get(SecretName.enablebanking_redirectUrl);
   const environment = (
     secretsService.get(SecretName.enablebanking_environment) || 'SANDBOX'
   ).toUpperCase();
@@ -51,6 +52,10 @@ function getEnableBankingConfig() {
   return {
     applicationId,
     privateKey,
+    redirectUrl:
+      typeof redirectUrl === 'string' && redirectUrl.trim() !== ''
+        ? redirectUrl.trim()
+        : null,
     environment,
   };
 }
@@ -396,6 +401,42 @@ function getPsuHeadersFromRequest(req) {
   return Object.keys(psuHeaders).length > 0 ? psuHeaders : null;
 }
 
+function getPublicOrigin(req) {
+  const forwardedProto = getHeaderValue(req, 'x-forwarded-proto');
+  const forwardedHost = getHeaderValue(req, 'x-forwarded-host');
+  const host = (forwardedHost || getHeaderValue(req, 'host') || '')
+    .split(',')[0]
+    .trim();
+  const proto = (forwardedProto || req.protocol || 'http').split(',')[0].trim();
+
+  if (!host) {
+    return null;
+  }
+
+  return `${proto}://${host}`;
+}
+
+function getDefaultRedirectUrl(req) {
+  const origin = getPublicOrigin(req);
+  if (!origin) {
+    return null;
+  }
+
+  return `${origin}/enablebanking/callback`;
+}
+
+function validateRedirectUrl(redirectUrl) {
+  try {
+    // Throws if malformed
+    new URL(redirectUrl);
+  } catch {
+    throw new EnableBankingApiError('WRONG_REQUEST_PARAMETERS', 400, {
+      error: 'WRONG_REQUEST_PARAMETERS',
+      message: 'Invalid redirect URL',
+    });
+  }
+}
+
 function getSessionPsuHeaders(sessionId) {
   if (!sessionId) {
     return null;
@@ -600,13 +641,15 @@ app.get('/callback', (req, res) => {
 app.use(validateSessionMiddleware);
 
 app.post('/status', async (_req, res) => {
-  const { environment } = getEnableBankingConfig();
+  const { environment, redirectUrl } = getEnableBankingConfig();
+  const callbackUrl = redirectUrl || getDefaultRedirectUrl(_req);
 
   res.send({
     status: 'ok',
     data: {
       configured: isEnableBankingConfigured(),
       environment,
+      callback_url: callbackUrl,
     },
   });
 });
@@ -656,30 +699,61 @@ app.post(
       language,
       psuId,
     } = req.body || {};
+    const { redirectUrl: configuredRedirectUrl } = getEnableBankingConfig();
+    const callbackUrl =
+      configuredRedirectUrl || redirectUrl || getDefaultRedirectUrl(req);
+
+    if (!callbackUrl) {
+      throw new EnableBankingApiError('WRONG_REQUEST_PARAMETERS', 400, {
+        error: 'WRONG_REQUEST_PARAMETERS',
+        message: 'Missing redirect URL',
+      });
+    }
+
+    validateRedirectUrl(callbackUrl);
     const normalizedAccess = await getNormalizedAccess({
       aspsp,
       access,
       psuType,
     });
 
-    const data = await enableBankingRequest({
-      path: '/auth',
-      method: 'POST',
-      body: {
-        aspsp,
-        access: normalizedAccess,
-        redirect_url: redirectUrl,
-        state,
-        ...(psuType ? { psu_type: psuType } : {}),
-        ...(authMethod ? { auth_method: authMethod } : {}),
-        ...(credentials ? { credentials } : {}),
-        ...(credentialsAutosubmit !== undefined
-          ? { credentials_autosubmit: credentialsAutosubmit }
-          : {}),
-        ...(language ? { language } : {}),
-        ...(psuId ? { psu_id: psuId } : {}),
-      },
-    });
+    let data;
+    try {
+      data = await enableBankingRequest({
+        path: '/auth',
+        method: 'POST',
+        body: {
+          aspsp,
+          access: normalizedAccess,
+          redirect_url: callbackUrl,
+          state,
+          ...(psuType ? { psu_type: psuType } : {}),
+          ...(authMethod ? { auth_method: authMethod } : {}),
+          ...(credentials ? { credentials } : {}),
+          ...(credentialsAutosubmit !== undefined
+            ? { credentials_autosubmit: credentialsAutosubmit }
+            : {}),
+          ...(language ? { language } : {}),
+          ...(psuId ? { psu_id: psuId } : {}),
+        },
+      });
+    } catch (error) {
+      if (
+        error instanceof EnableBankingApiError &&
+        getEnableBankingErrorCode(error) === 'REDIRECT_URI_NOT_ALLOWED'
+      ) {
+        res.send({
+          status: 'ok',
+          data: {
+            error_code: 'REDIRECT_URI_NOT_ALLOWED',
+            error_description: `Redirect URL is not allowed for this app: ${callbackUrl}`,
+            redirect_url: callbackUrl,
+          },
+        });
+        return;
+      }
+      throw error;
+    }
 
     if (data.authorization_id) {
       setTemporaryEntry(TEMP_PENDING_AUTH_PREFIX, data.authorization_id, {
@@ -693,6 +767,7 @@ app.post(
       status: 'ok',
       data: {
         ...data,
+        redirect_url: callbackUrl,
         state,
       },
     });
