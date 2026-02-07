@@ -36,12 +36,10 @@ function useAvailableAspsps(country?: string) {
   const [aspsps, setAspsps] = useState<EnableBankingAspspOption[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isError, setIsError] = useState(false);
-  const [hasOnlyMockAspsps, setHasOnlyMockAspsps] = useState(false);
 
   useEffect(() => {
     async function fetch() {
       setIsError(false);
-      setHasOnlyMockAspsps(false);
 
       if (!country) {
         setAspsps([]);
@@ -65,21 +63,12 @@ function useAvailableAspsps(country?: string) {
       const items = Array.isArray(primaryResponse.data?.aspsps)
         ? primaryResponse.data.aspsps
         : [];
-      const nonMockItems = items.filter(
-        aspsp => aspsp.name.trim().toLowerCase() !== 'mock aspsp',
+      setAspsps(
+        items.map(aspsp => ({
+          ...aspsp,
+          id: `${aspsp.country}:${aspsp.name}`,
+        })),
       );
-
-      if (nonMockItems.length === 0) {
-        setHasOnlyMockAspsps(items.length > 0);
-        setAspsps([]);
-      } else {
-        setAspsps(
-          nonMockItems.map(aspsp => ({
-            ...aspsp,
-            id: `${aspsp.country}:${aspsp.name}`,
-          })),
-        );
-      }
 
       setIsLoading(false);
     }
@@ -91,7 +80,6 @@ function useAvailableAspsps(country?: string) {
     data: aspsps,
     isLoading,
     isError,
-    hasOnlyMockAspsps,
   };
 }
 
@@ -147,7 +135,6 @@ export function EnableBankingExternalMsgModal({
     data: aspspOptions,
     isLoading: isAspspsLoading,
     isError: isAspspError,
-    hasOnlyMockAspsps,
   } = useAvailableAspsps(country);
   const {
     configuredEnableBanking: isConfigured,
@@ -273,14 +260,6 @@ export function EnableBankingExternalMsgModal({
                   country &&
                   (isAspspsLoading ? (
                     t('Loading banks...')
-                  ) : hasOnlyMockAspsps ? (
-                    <Error>
-                      <Trans>
-                        No live banks were returned for this country. Your
-                        current Enable Banking app appears to have sandbox-only
-                        coverage for this selection.
-                      </Trans>
-                    </Error>
                   ) : aspspOptions.length === 0 ? (
                     <Error>
                       <Trans>

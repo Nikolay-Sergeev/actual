@@ -306,30 +306,59 @@ async function downloadEnableBankingTransactions(
 
   logger.log('Pulling transactions from Enable Banking');
 
-  const res = await post(
-    getServer().ENABLEBANKING_SERVER + '/transactions',
-    {
-      accountId: acctId,
-      sessionId: bankId,
-      startDate: since,
-    },
-    {
-      'X-ACTUAL-TOKEN': userToken,
-    },
-    60000,
-  );
+  let continuationKey: string | null = null;
+  let includeBalance = true;
+  let accountBalance = [];
+  let startingBalance = 0;
+  const allTransactions = [];
+  const seenContinuationKeys = new Set<string>();
 
-  if (res.error_code) {
-    throw BankSyncError(res.error_type, res.error_code);
-  } else if ('error' in res) {
-    throw BankSyncError('Connection', res.error);
-  }
+  do {
+    const res = await post(
+      getServer().ENABLEBANKING_SERVER + '/transactions',
+      {
+        accountId: acctId,
+        sessionId: bankId,
+        startDate: since,
+        continuationKey,
+        includeBalance,
+      },
+      {
+        'X-ACTUAL-TOKEN': userToken,
+      },
+      60000,
+    );
 
-  const singleRes = res as BankSyncResponse;
+    if (res.error_code) {
+      throw BankSyncError(res.error_type, res.error_code);
+    } else if ('error' in res) {
+      throw BankSyncError('Connection', res.error);
+    }
+
+    const page = res as BankSyncResponse & { continuation_key?: string | null };
+    allTransactions.push(...(page.transactions?.all ?? []));
+
+    if (includeBalance) {
+      accountBalance = page.balances;
+      startingBalance = page.startingBalance;
+      includeBalance = false;
+    }
+
+    continuationKey = page.continuation_key ?? null;
+    if (continuationKey) {
+      if (seenContinuationKeys.has(continuationKey)) {
+        throw new Error(
+          'Enable Banking returned a repeated continuation key while paginating transactions',
+        );
+      }
+      seenContinuationKeys.add(continuationKey);
+    }
+  } while (continuationKey);
+
   const retVal = {
-    transactions: singleRes.transactions.all,
-    accountBalance: singleRes.balances,
-    startingBalance: singleRes.startingBalance,
+    transactions: allTransactions,
+    accountBalance,
+    startingBalance,
   };
 
   logger.log('Response:', retVal);
