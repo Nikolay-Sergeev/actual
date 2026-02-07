@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
 
 import express from 'express';
+import jws from 'jws';
 
 import { handleError } from '../app-gocardless/util/handle-error';
+import { SecretName, secretsService } from '../services/secrets-service';
 import {
   requestLoggerMiddleware,
   validateSessionMiddleware,
@@ -15,7 +17,11 @@ app.use(requestLoggerMiddleware);
 app.use(express.json());
 
 const ENABLE_BANKING_API_URL = 'https://api.enablebanking.com';
+const ENABLE_BANKING_ISSUER = 'enablebanking.com';
+const ENABLE_BANKING_AUDIENCE = 'api.enablebanking.com';
+const MAX_JWT_TTL_SECONDS = 24 * 60 * 60;
 const AUTH_STATE_TTL_MS = 30 * 60 * 1000;
+const ENABLE_BANKING_ENVIRONMENTS = new Set(['SANDBOX', 'PRODUCTION']);
 
 const pendingAuthById = new Map();
 const authResultByState = new Map();
@@ -27,6 +33,72 @@ class EnableBankingApiError extends Error {
     this.status = status;
     this.details = details;
   }
+}
+
+function getEnableBankingConfig() {
+  const applicationId = secretsService.get(SecretName.enablebanking_applicationId);
+  const privateKey = secretsService.get(SecretName.enablebanking_privateKey);
+  const environment = (
+    secretsService.get(SecretName.enablebanking_environment) || 'SANDBOX'
+  ).toUpperCase();
+
+  return {
+    applicationId,
+    privateKey,
+    environment,
+  };
+}
+
+function isEnableBankingConfigured() {
+  const { applicationId, privateKey, environment } = getEnableBankingConfig();
+
+  return Boolean(
+    applicationId &&
+      privateKey &&
+      ENABLE_BANKING_ENVIRONMENTS.has(environment),
+  );
+}
+
+function normalizePrivateKey(privateKey) {
+  return privateKey?.includes('\\n')
+    ? privateKey.replaceAll('\\n', '\n')
+    : privateKey;
+}
+
+function createEnableBankingJwt() {
+  const { applicationId, privateKey, environment } = getEnableBankingConfig();
+
+  if (!applicationId || !privateKey) {
+    throw new EnableBankingApiError('ENABLE_BANKING_NOT_CONFIGURED', 401, {
+      error: 'ENABLE_BANKING_NOT_CONFIGURED',
+      message: 'Application ID and private key are required',
+    });
+  }
+
+  if (!ENABLE_BANKING_ENVIRONMENTS.has(environment)) {
+    throw new EnableBankingApiError('ENABLE_BANKING_NOT_CONFIGURED', 401, {
+      error: 'ENABLE_BANKING_NOT_CONFIGURED',
+      message: 'Environment must be SANDBOX or PRODUCTION',
+    });
+  }
+
+  const issuedAt = Math.floor(Date.now() / 1000);
+  const expirationTime = issuedAt + Math.min(MAX_JWT_TTL_SECONDS, 60 * 60);
+
+  return jws.sign({
+    header: {
+      typ: 'JWT',
+      alg: 'RS256',
+      kid: applicationId,
+    },
+    payload: {
+      iss: ENABLE_BANKING_ISSUER,
+      aud: ENABLE_BANKING_AUDIENCE,
+      iat: issuedAt,
+      exp: expirationTime,
+    },
+    privateKey: normalizePrivateKey(privateKey),
+  });
 }
 
 function cleanupAuthCache() {
@@ -60,13 +132,10 @@ function getQueryString(query) {
 async function enableBankingRequest({
   path,
   method = 'GET',
-  jwt,
   query = null,
   body = null,
 }) {
-  if (!jwt || typeof jwt !== 'string') {
-    throw new EnableBankingApiError('MISSING_JWT', 401);
-  }
+  const jwt = createEnableBankingJwt();
 
   const url = `${ENABLE_BANKING_API_URL}${path}${getQueryString(query)}`;
   const response = await fetch(url, {
@@ -253,20 +322,19 @@ app.get('/callback', (req, res) => {
 app.use(validateSessionMiddleware);
 
 app.post('/status', async (_req, res) => {
+  const { environment } = getEnableBankingConfig();
+
   res.send({
     status: 'ok',
     data: {
-      configured: Boolean(
-        process.env.ENABLEBANKING_APPLICATION_ID &&
-          process.env.ENABLEBANKING_PRIVATE_KEY,
-      ),
+      configured: isEnableBankingConfigured(),
+      environment,
     },
   });
 });
 
 const getAspsps = handleError(async (req, res) => {
   const {
-    jwt,
     country = null,
     psuType = null,
     service = 'AIS',
@@ -276,7 +344,6 @@ const getAspsps = handleError(async (req, res) => {
   const data = await enableBankingRequest({
     path: '/aspsps',
     method: 'GET',
-    jwt,
     query: {
       country,
       psu_type: psuType,
@@ -300,7 +367,6 @@ app.post(
     cleanupAuthCache();
 
     const {
-      jwt,
       aspsp,
       access,
       redirectUrl,
@@ -316,7 +382,6 @@ app.post(
     const data = await enableBankingRequest({
       path: '/auth',
       method: 'POST',
-      jwt,
       body: {
         aspsp,
         access,
@@ -355,7 +420,7 @@ app.post(
   handleError(async (req, res) => {
     cleanupAuthCache();
 
-    const { jwt, authorizationId, state } = req.body || {};
+    const { authorizationId, state } = req.body || {};
     const pending = authorizationId ? pendingAuthById.get(authorizationId) : {};
     const authState = state || pending?.state;
 
@@ -397,7 +462,6 @@ app.post(
     const session = await enableBankingRequest({
       path: '/sessions',
       method: 'POST',
-      jwt,
       body: {
         code: callbackResult.code,
       },
@@ -427,12 +491,11 @@ app.post(
 app.post(
   '/accounts',
   handleError(async (req, res) => {
-    const { jwt, sessionId } = req.body || {};
+    const { sessionId } = req.body || {};
 
     const session = await enableBankingRequest({
       path: `/sessions/${sessionId}`,
       method: 'GET',
-      jwt,
     });
 
     const accountIds =
@@ -446,7 +509,6 @@ app.post(
           return await enableBankingRequest({
             path: `/accounts/${accountId}/details`,
             method: 'GET',
-            jwt,
           });
         } catch {
           return null;
@@ -476,7 +538,6 @@ app.post(
 
 app.post('/transactions', async (req, res) => {
   const {
-    jwt,
     accountId,
     startDate,
     endDate,
@@ -490,7 +551,6 @@ app.post('/transactions', async (req, res) => {
     const transactionsResponse = await enableBankingRequest({
       path: `/accounts/${accountId}/transactions`,
       method: 'GET',
-      jwt,
       query: {
         date_from: startDate,
         date_to: endDate,
@@ -505,7 +565,6 @@ app.post('/transactions', async (req, res) => {
       const balancesResponse = await enableBankingRequest({
         path: `/accounts/${accountId}/balances`,
         method: 'GET',
-        jwt,
       });
       normalizedBalances = normalizeBalances(balancesResponse.balances);
     }
@@ -534,12 +593,11 @@ app.post('/transactions', async (req, res) => {
 app.post(
   '/remove-account',
   handleError(async (req, res) => {
-    const { jwt, sessionId } = req.body || {};
+    const { sessionId } = req.body || {};
 
     const data = await enableBankingRequest({
       path: `/sessions/${sessionId}`,
       method: 'DELETE',
-      jwt,
     });
 
     res.send({
