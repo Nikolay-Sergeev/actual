@@ -354,7 +354,12 @@ export function CreateAccountModal({
           name: 'enablebanking_environment',
           value: null,
         }).then(() => {
-          setIsEnableBankingSetupComplete(false);
+          send('secret-set', {
+            name: 'enablebanking_redirectUrl',
+            value: null,
+          }).then(() => {
+            setIsEnableBankingSetupComplete(false);
+          });
         });
       });
     });

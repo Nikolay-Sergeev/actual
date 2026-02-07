@@ -94,7 +94,7 @@ function _authorize(
   );
 }
 
-export async function authorizeEnableBanking(dispatch: AppDispatch) {
+export function authorizeEnableBanking(dispatch: AppDispatch) {
   _authorize(dispatch, {
     onSuccess: async data => {
       dispatch(

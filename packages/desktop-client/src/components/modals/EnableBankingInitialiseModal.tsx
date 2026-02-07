@@ -121,7 +121,7 @@ export function EnableBankingInitialiseModal({
     ({ error, reason } =
       (await send('secret-set', {
         name: 'enablebanking_redirectUrl',
-        value: normalizedRedirectUrl,
+        value: normalizedRedirectUrl === '' ? null : normalizedRedirectUrl,
       })) || {});
 
     if (error) {

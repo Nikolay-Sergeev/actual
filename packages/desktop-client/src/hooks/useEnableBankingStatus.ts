@@ -17,12 +17,12 @@ export function useEnableBankingStatus() {
 
       const results = await send('enablebanking-status');
 
-      setConfiguredEnableBanking(results.configured || false);
+      setConfiguredEnableBanking(Boolean(results?.configured));
       setIsLoading(false);
     }
 
     if (status === 'online') {
-      fetch();
+      void fetch();
     }
   }, [status]);
 

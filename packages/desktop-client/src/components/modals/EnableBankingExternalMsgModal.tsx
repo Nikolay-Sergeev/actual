@@ -108,7 +108,7 @@ function renderError(
         ? t('Timed out. Please try again.')
         : t(
             'An error occurred while linking your account, sorry! The potential issue could be: {{ message }}',
-            { message: error.message },
+            { message: error.message || t('Unknown error') },
           )}
     </Error>
   );
@@ -136,7 +136,7 @@ export function EnableBankingExternalMsgModal({
     COUNTRY_OPTIONS,
   );
 
-  const [waiting, setWaiting] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState<null | 'browser' | 'accounts'>(null);
   const [success, setSuccess] = useState<boolean>(false);
   const [country, setCountry] = useState<string | undefined>(detectedCountry);
   const [aspspId, setAspspId] = useState<string>();
