@@ -1,5 +1,3 @@
-import type { EnableBankingTransaction } from '#app-enablebanking/services/enablebanking-service';
-
 import type { IBank } from './bank.interface';
 import { IntegrationBank as Fallback } from './integration-bank';
 
@@ -29,20 +27,16 @@ export const NbgEthngraaxxx = {
       return Fallback.normalizeTransaction(transaction);
     }
 
-    const editedTransaction = {
-      ...transaction,
-      credit_debit_indicator: 'DBIT',
-      remittance_information: [
-        description.slice(PURCHASE_PREFIX.length),
-        ...remainingRemittance,
-      ],
-    } satisfies EnableBankingTransaction;
-    const normalizedTransaction =
-      Fallback.normalizeTransaction(editedTransaction);
-
     // Preserve provider fields for bank sync field mapping and diagnostics.
     return {
-      ...normalizedTransaction,
+      ...Fallback.normalizeTransaction({
+        ...transaction,
+        credit_debit_indicator: 'DBIT',
+        remittance_information: [
+          description.slice(PURCHASE_PREFIX.length),
+          ...remainingRemittance,
+        ],
+      }),
       credit_debit_indicator: transaction.credit_debit_indicator,
       remittance_information: transaction.remittance_information,
     };

@@ -15,7 +15,6 @@ import { isBlockedIp } from '#util/ssrf';
 import { BankFactory } from './bank-factory';
 import type {
   EnableBankingSession,
-  normalizeTransaction,
   PsuHeaders,
 } from './services/enablebanking-service';
 import {
@@ -573,10 +572,11 @@ app.post(
         psuHeaders,
       );
 
-      const all: ReturnType<typeof normalizeTransaction>[] = [];
-      const booked: ReturnType<typeof normalizeTransaction>[] = [];
-      const pending: ReturnType<typeof normalizeTransaction>[] = [];
       const bank = BankFactory(aspspName);
+      type NormalizedTransaction = ReturnType<typeof bank.normalizeTransaction>;
+      const all: NormalizedTransaction[] = [];
+      const booked: NormalizedTransaction[] = [];
+      const pending: NormalizedTransaction[] = [];
 
       for (const tx of rawTransactions) {
         const normalized = bank.normalizeTransaction(tx);
