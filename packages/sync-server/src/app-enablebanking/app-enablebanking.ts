@@ -12,8 +12,10 @@ import {
 } from '#util/middlewares';
 import { isBlockedIp } from '#util/ssrf';
 
+import { BankFactory } from './bank-factory';
 import type {
   EnableBankingSession,
+  normalizeTransaction,
   PsuHeaders,
 } from './services/enablebanking-service';
 import {
@@ -21,7 +23,6 @@ import {
   isImportableTransaction,
   normalizeAccount,
   normalizeBalance,
-  normalizeTransaction,
 } from './services/enablebanking-service';
 import { EnableBankingError } from './utils/errors';
 
@@ -575,9 +576,10 @@ app.post(
       const all: ReturnType<typeof normalizeTransaction>[] = [];
       const booked: ReturnType<typeof normalizeTransaction>[] = [];
       const pending: ReturnType<typeof normalizeTransaction>[] = [];
+      const bank = BankFactory(aspspName);
 
       for (const tx of rawTransactions) {
-        const normalized = normalizeTransaction(tx);
+        const normalized = bank.normalizeTransaction(tx);
 
         // Drop records Actual's client can't insert (empty/non-ISO date or
         // non-numeric amount) — one of them would otherwise abort the entire
