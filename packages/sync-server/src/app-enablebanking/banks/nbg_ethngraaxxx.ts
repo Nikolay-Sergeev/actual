@@ -4,8 +4,6 @@ import { IntegrationBank as Fallback } from './integration-bank';
 const PURCHASE_PREFIX = 'ΑΓΟΡΑ ';
 
 export const NbgEthngraaxxx = {
-  ...Fallback,
-
   aspspNames: ['National Bank of Greece'],
 
   /**

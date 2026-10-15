@@ -74,6 +74,51 @@ describe('POST /transactions', () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    {
+      name: 'corrects NBG purchases for National Bank of Greece',
+      aspspName: 'National Bank of Greece',
+      expectedAmount: '-5.00',
+      expectedPayeeName: 'Example Store',
+    },
+    {
+      name: 'preserves purchases from another bank',
+      aspspName: 'Another Bank',
+      expectedAmount: '5.00',
+      expectedPayeeName: 'ΑΓΟΡΑ Example Store',
+    },
+    {
+      name: 'preserves purchases when the bank name is missing',
+      aspspName: undefined,
+      expectedAmount: '5.00',
+      expectedPayeeName: 'ΑΓΟΡΑ Example Store',
+    },
+  ])('$name', async ({ aspspName, expectedAmount, expectedPayeeName }) => {
+    vi.spyOn(enableBankingService, 'getAllTransactions').mockResolvedValue([
+      {
+        booking_date: '2026-03-01',
+        status: 'PDNG',
+        transaction_amount: { currency: 'EUR', amount: '5.00' },
+        credit_debit_indicator: 'CRDT',
+        remittance_information: ['ΑΓΟΡΑ Example Store'],
+      },
+    ]);
+
+    const res = await request(app).post('/transactions').send({
+      accountId: 'acc-1',
+      startDate: '2026-03-01',
+      aspspName,
+    });
+
+    expect(res.body.data.transactions.all).toMatchObject([
+      {
+        transactionAmount: { amount: expectedAmount, currency: 'EUR' },
+        payeeName: expectedPayeeName,
+        booked: false,
+      },
+    ]);
+  });
+
   it('skips a date-less pending transaction while keeping valid booked and pending ones', async () => {
     // mockPendingTransactionNoDate normalizes to date '' — the record that would
     // otherwise abort the whole sync when Actual's client tries to insert it.
